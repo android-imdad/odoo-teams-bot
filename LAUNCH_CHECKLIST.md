@@ -6,11 +6,11 @@ Use this checklist to deploy and launch your Microsoft Teams bot for Odoo timesh
 
 ## Prerequisites
 
-- [x] Node.js v20+ installed
-- [x] npm installed
-- [x] Access to Microsoft Azure account
-- [x] Access to Odoo instance
-- [x] Google account for Gemini API
+- [ ] Node.js v20+ installed
+- [ ] npm installed
+- [ ] Access to Microsoft Azure account
+- [ ] Access to Odoo instance
+- [ ] Google account for Gemini API
 
 ---
 
@@ -18,16 +18,14 @@ Use this checklist to deploy and launch your Microsoft Teams bot for Odoo timesh
 
 Register your bot with Azure Bot Service:
 
-- [x] Go to [Azure Portal](https://portal.azure.com)
-- [x] Create a new "Azure Bot" resource
-- [x] Select "Multi-tenant" or "Single-tenant" as needed
-- [x] Enable "Microsoft Teams" channel
-- [x] Copy the **Microsoft App ID** → set as `BOT_ID` in `.env`
-- [x] Go to "Certificates & secrets"
-- [x] Create a new client secret
-- [x] Copy the secret value → set as `BOT_PASSWORD` in `.env`
-
-**Note**: Keep these credentials secure and never commit `.env` to git.
+- [ ] Go to [Azure Portal](https://portal.azure.com)
+- [ ] Create a new "Azure Bot" resource
+- [ ] Select "Multi-tenant" or "Single-tenant" as needed
+- [ ] Enable "Microsoft Teams" channel
+- [ ] Copy the **Microsoft App ID** → set as `BOT_ID` in `.env`
+- [ ] Go to "Certificates & secrets"
+- [ ] Create a new client secret
+- [ ] Copy the secret value → set as `BOT_PASSWORD` in `.env`
 
 ---
 
@@ -42,26 +40,19 @@ ODOO_USERNAME=your-username
 ODOO_PASSWORD=your-password
 ```
 
-- [x] Update `ODOO_URL` with your Odoo instance URL
-- [x] Update `ODOO_DB` with your database name
-- [x] Update `ODOO_USERNAME` with your Odoo username
-- [x] Update `ODOO_PASSWORD` with your Odoo password
-
-**Note**: If using Odoo Online (trial), the bot handles missing `code` field gracefully.
+- [ ] Update `ODOO_URL` with your Odoo instance URL
+- [ ] Update `ODOO_DB` with your database name
+- [ ] Update `ODOO_USERNAME` with your Odoo username
+- [ ] Update `ODOO_PASSWORD` with your Odoo password
 
 ---
 
 ## 3. Get Gemini API Key
 
-- [x] Go to [Google AI Studio](https://aistudio.google.com/app/apikey)
-- [x] Sign in with your Google account
-- [x] Click "Create API Key"
-- [x] Copy the API key → set as `GEMINI_API_KEY` in `.env`
-
-**Recommended Models**:
-- `gemini-1.5-flash-latest` - Stable, recommended for production
-- `gemini-2.5-flash` - Latest preview model (uses v1beta API)
-- Avoid preview models in production unless you need specific features
+- [ ] Go to [Google AI Studio](https://aistudio.google.com/app/apikey)
+- [ ] Sign in with your Google account
+- [ ] Click "Create API Key"
+- [ ] Copy the API key → set as `GEMINI_API_KEY` in `.env`
 
 ---
 
@@ -83,7 +74,7 @@ ODOO_PASSWORD=your-password
 
 # Gemini AI Configuration
 GEMINI_API_KEY=your-real-gemini-api-key
-GEMINI_MODEL=gemini-1.5-flash-latest
+GEMINI_MODEL=gemini-3-flash-preview
 
 # Cache Configuration
 PROJECT_CACHE_TTL=3600000
@@ -96,14 +87,8 @@ LOG_FILE=logs/bot.log
 NODE_ENV=production
 ```
 
-- [x] All placeholder values replaced with real credentials
-- [x] No trailing spaces or extra characters
-
-**Quick Setup**:
-```bash
-cp .env.example .env
-# Edit .env with your credentials
-```
+- [ ] All placeholder values replaced with real credentials
+- [ ] No trailing spaces or extra characters
 
 ---
 
@@ -113,8 +98,8 @@ cp .env.example .env
 npm install
 ```
 
-- [x] Dependencies installed successfully
-- [x] No errors in npm output
+- [ ] Dependencies installed successfully
+- [ ] No errors in npm output
 
 ---
 
@@ -124,9 +109,9 @@ npm install
 npm run build
 ```
 
-- [x] TypeScript compilation successful
-- [x] `dist/` folder created with compiled JavaScript
-- [x] No compilation errors
+- [ ] TypeScript compilation successful
+- [ ] `dist/` folder created with compiled JavaScript
+- [ ] No compilation errors
 
 ---
 
@@ -141,8 +126,8 @@ Or for development with auto-reload:
 npm run dev
 ```
 
-- [x] Server starts on port 3978
-- [x] Console shows "Server listening on http://localhost:3978"
+- [ ] Server starts on port 3978
+- [ ] Console shows "Server listening on http://localhost:3978"
 
 ---
 
@@ -163,7 +148,7 @@ Expected response:
 }
 ```
 
-- [x] Health endpoint returns `status: "healthy"`
+- [ ] Health endpoint returns `status: "healthy"`
 
 ---
 
@@ -171,80 +156,35 @@ Expected response:
 
 ### Option A: Bot Framework Emulator (Local Testing)
 
-**Note**: The bot is configured to allow emulator connections without auth in development mode.
-
-- [x] Install Bot Framework Emulator:
+- [ ] Install Bot Framework Emulator:
   ```bash
   npm install -g botframework-emulator
   botframework-emulator
   ```
 
-- [x] Open the Emulator
-- [x] Click "Open Bot"
-- [x] Enter URL: `http://localhost:3978/api/messages`
-- [x] Leave Microsoft App ID and Password **empty** for local testing
-- [x] Click "Connect"
-- [x] Send a test message: "Log 2 hours on Project X"
+- [ ] Open the Emulator
+- [ ] Click "Open Bot"
+- [ ] Enter URL: `http://localhost:3978/api/messages`
+- [ ] Leave Microsoft App ID and Password empty for local testing
+- [ ] Click "Connect"
+- [ ] Send a test message: "Log 2 hours on Project X"
 
-**Known Emulator Limitations**:
-- Card updates (Confirm/Cancel) won't visually replace the card in emulator, but work correctly in real Teams
-- The bot will still process actions correctly
+### Option B: Deploy to Azure (Production)
 
----
+- [ ] Build Docker image:
+  ```bash
+  docker build -t odoo-teams-bot .
+  ```
 
-### Option B: Test with ngrok (Full Azure Integration)
+- [ ] Run with Docker:
+  ```bash
+  docker run -p 3978:3978 --env-file .env odoo-teams-bot
+  ```
 
-Test Azure authentication without deploying:
-
-```bash
-# Install ngrok
-npm install -g ngrok
-
-# Start ngrok (in a new terminal)
-ngrok http 3978
-
-# Copy the HTTPS URL (e.g., https://abc123.ngrok.io)
-```
-
-- [ ] In Azure Portal → Bot Configuration → Set Messaging endpoint: `https://abc123.ngrok.io/api/messages`
-- [ ] Enable Microsoft Teams channel in Azure
-- [ ] Test in Teams with your bot
-
----
-
-### Option C: Deploy to Azure (Production)
-
-#### Build Docker Image
-```bash
-docker build -t odoo-teams-bot .
-```
-
-#### Run with Docker
-```bash
-docker run -p 3978:3978 --env-file .env odoo-teams-bot
-```
-
-#### Or use Docker Compose
-```bash
-docker-compose up -d
-```
-
-#### Deploy to Azure Web App
-```bash
-# Login to Azure
-az login
-
-# Create resource group
-az group create --name odoo-teams-bot-rg --location eastus
-
-# Create App Service plan
-az appservice plan create --name odoo-teams-bot-plan --resource-group odoo-teams-bot-rg --sku B1 --is-linux
-
-# Create Web App
-az webapp create --resource-group odoo-teams-bot-rg --plan odoo-teams-bot-plan --name odoo-teams-bot-app --deployment-container-image-name odoo-teams-bot:latest
-
-# Configure environment variables in Azure Portal
-```
+- [ ] Or use Docker Compose:
+  ```bash
+  docker-compose up -d
+  ```
 
 - [ ] Deploy to your hosting provider (Azure/AWS/GCP)
 - [ ] Configure your Azure Bot's endpoint to your deployed URL
@@ -254,39 +194,23 @@ az webapp create --resource-group odoo-teams-bot-rg --plan odoo-teams-bot-plan -
 
 ## 10. Test the Bot
 
-### In Microsoft Teams:
+In Microsoft Teams:
 
-- [ ] Find your bot in Teams (via Azure Bot → Channels → Teams)
 - [ ] Add your bot to a Teams chat or channel
 - [ ] Send a test timesheet entry:
   ```
   Log 3 hours on Project A today
   ```
 - [ ] Verify the bot responds with an Adaptive Card
-- [ ] Click "Confirm" and verify the card updates
 - [ ] Verify the timesheet is created in Odoo
-
-### Test Natural Language Examples:
-
-```
-Log 2 hours on SSI project today
-Log 4h on Website Redesign yesterday
-Add 3.5 hours to Mobile App for fixing login bug
-Log time: 5 hours on Backend API on Monday
-```
 
 ---
 
 ## 11. Verify Logging
 
-- [x] Check `logs/bot.log` for entries
-- [x] Verify no critical errors in logs
-- [x] Confirm audit trail is logging user actions
-
-**View logs**:
-```bash
-tail -f logs/bot.log
-```
+- [ ] Check `logs/bot.log` for entries
+- [ ] Verify no critical errors in logs
+- [ ] Confirm audit trail is logging user actions
 
 ---
 
@@ -305,19 +229,15 @@ tail -f logs/bot.log
 | Issue | Solution |
 |-------|----------|
 | Bot not responding | Check `.env` credentials, verify Odoo connectivity |
-| Parsing failures | Verify `GEMINI_API_KEY` is valid and model exists |
-| 404 on Gemini API | Preview models need v1beta API - bot handles this automatically |
+| Parsing failures | Verify `GEMINI_API_KEY` is valid |
 | Port already in use | Change `PORT` in `.env` or stop conflicting process |
 | Odoo connection refused | Verify `ODOO_URL` is accessible from your network |
 | TypeScript errors | Run `npm run lint:fix` to auto-fix issues |
-| Card buttons not working in emulator | Emulator limitation - works correctly in real Teams |
-| "Unauthorized" errors in emulator | Bot allows local testing without auth in dev mode |
 
 ---
 
 ## Post-Launch
 
-- [x] Code pushed to GitHub (`git push origin main`)
 - [ ] Set up CI/CD pipeline (`.github/workflows/ci.yml`)
 - [ ] Configure monitoring and alerts
 - [ ] Review audit logs regularly
@@ -334,6 +254,4 @@ tail -f logs/bot.log
 
 ---
 
-**Last Updated**: 2026-01-29
-
-**Status**: Ready for production deployment
+**Last Updated**: 2025-01-07
