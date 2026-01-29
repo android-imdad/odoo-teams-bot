@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm test:*)",
+      "Bash(find:*)",
+      "Bash(npx tsc:*)",
+      "Bash(timeout:*)",
+      "Bash(cat:*)",
+      "Bash(test:*)",
+      "Bash(docker-compose:*)",
+      "Bash(curl:*)",
+      "Bash(lsof:*)",
+      "Bash(npm start)",
+      "Bash(pkill:*)",
+      "Bash(npm run build:*)",
+      "Bash(read:*)",
+      "mcp__web-search-prime__webSearchPrime",
+      "mcp__web-reader__webReader",
+      "Bash(npm view:*)",
+      "Bash(npm install:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}

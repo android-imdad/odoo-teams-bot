@@ -1,0 +1,19 @@
+export interface AdaptiveCardAction {
+  type: string;
+  verb: string;
+  data: TimesheetCardData;
+}
+
+export interface TimesheetCardData {
+  project_id: number;
+  project_name: string;
+  hours: number;
+  date: string;
+  description: string;
+}
+
+export interface BotError extends Error {
+  code?: string;
+  context?: any;
+  recoverable?: boolean;
+}
