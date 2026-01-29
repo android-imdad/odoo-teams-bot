@@ -1,0 +1,44 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.16",
+  "version": "1.0.0",
+  "id": "0693f8de-e108-4bb6-8fe1-36bf503a05bd",
+  "packageName": "com.odoo.teamsbot",
+  "developer": {
+    "name": "Your Organization",
+    "websiteUrl": "https://your-website.com",
+    "privacyUrl": "https://your-website.com/privacy",
+    "termsOfUseUrl": "https://your-website.com/terms"
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "name": {
+    "short": "Odoo Timesheet Bot",
+    "full": "Odoo Timesheet Management Bot"
+  },
+  "description": {
+    "short": "Log timesheets to Odoo from Teams",
+    "full": "Use natural language to log timesheet entries to your Odoo instance directly from Microsoft Teams."
+  },
+  "bots": [
+    {
+      "botId": "0693f8de-e108-4bb6-8fe1-36bf503a05bd",
+      "scopes": [
+        "personal",
+        "team",
+        "groupchat"
+      ],
+      "supportsFiles": false,
+      "isNotificationOnly": false
+    }
+  ],
+  "permissions": [
+    "identity",
+    "messageTeamMembers"
+  ],
+  "validDomains": [
+    "brusque-cyrus-unabsorbable.ngrok-free.dev"
+  ]
+}
