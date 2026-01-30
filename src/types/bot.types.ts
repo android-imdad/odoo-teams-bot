@@ -7,6 +7,10 @@ export interface AdaptiveCardAction {
 export interface TimesheetCardData {
   project_id: number;
   project_name: string;
+  task_id?: number;
+  task_name?: string;
+  create_new_task?: boolean;
+  new_task_name?: string;
   hours: number;
   date: string;
   description: string;

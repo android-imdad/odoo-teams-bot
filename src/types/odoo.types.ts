@@ -12,6 +12,13 @@ export interface OdooProject {
   active: boolean;
 }
 
+export interface OdooTask {
+  id: number;
+  name: string;
+  project_id: number;
+  active: boolean;
+}
+
 export interface OdooTimesheetParams {
   project_id: number;
   name: string; // description

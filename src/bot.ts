@@ -83,8 +83,17 @@ export class TimesheetBot extends TeamsActivityHandler {
         return;
       }
 
-      // Parse the timesheet text using Gemini
-      const parsed = await parserService.parseText(userText, projects);
+      // First pass: parse to identify project
+      const initialParse = await parserService.parseText(userText, projects);
+
+      // If project identified, fetch tasks for that project
+      let tasks: any[] = [];
+      if (initialParse.project_id) {
+        tasks = await odooService.getTasks(initialParse.project_id);
+      }
+
+      // Second pass: parse with tasks included
+      const parsed = await parserService.parseText(userText, projects, tasks);
 
       // Check if parsing was successful
       if (parsed.error || !parsed.project_id || !parsed.hours || !parsed.date) {
@@ -98,6 +107,10 @@ export class TimesheetBot extends TeamsActivityHandler {
       const cardData: TimesheetCardData = {
         project_id: parsed.project_id,
         project_name: parsed.project_name!,
+        task_id: parsed.task_id || undefined,
+        task_name: parsed.task_name || undefined,
+        create_new_task: parsed.create_new_task || undefined,
+        new_task_name: parsed.new_task_name || undefined,
         hours: parsed.hours,
         date: parsed.date,
         description: parsed.description
@@ -126,10 +139,47 @@ export class TimesheetBot extends TeamsActivityHandler {
     try {
       logger.info('Saving timesheet to Odoo', { data });
 
+      let taskId = data.task_id;
+      let taskName = data.task_name;
+
+      // Create new task if requested
+      if (data.create_new_task && data.new_task_name) {
+        logger.info('Creating new task before logging time', {
+          projectId: data.project_id,
+          taskName: data.new_task_name
+        });
+
+        try {
+          const newTaskId = await odooService.createTask(
+            data.project_id,
+            data.new_task_name,
+            data.description
+          );
+
+          taskId = newTaskId;
+          taskName = data.new_task_name;
+
+          logger.info('New task created successfully', {
+            taskId: newTaskId,
+            taskName: data.new_task_name
+          });
+        } catch (taskError) {
+          logger.error('Failed to create new task', { taskError, data });
+          await context.sendActivity({
+            attachments: [TimesheetCardGenerator.createErrorCard(
+              'Failed to create the new task in Odoo. The timesheet will be logged without a task.'
+            )]
+          });
+          // Continue without task - taskId remains undefined
+        }
+      }
+
       // Create timesheet entry
       const entry: TimesheetEntry = {
         project_id: data.project_id,
         project_name: data.project_name,
+        task_id: taskId,
+        task_name: taskName,
         hours: data.hours,
         date: data.date,
         description: data.description
@@ -143,8 +193,15 @@ export class TimesheetBot extends TeamsActivityHandler {
         userId: context.activity.from.id
       });
 
+      // Update data with the new task info for the confirmed card
+      const confirmedData: TimesheetCardData = {
+        ...data,
+        task_id: taskId,
+        task_name: taskName
+      };
+
       // Update the original card to show confirmed state (removes buttons)
-      const confirmedCard = TimesheetCardGenerator.createConfirmedCard(data);
+      const confirmedCard = TimesheetCardGenerator.createConfirmedCard(confirmedData);
       await context.updateActivity({
         id: context.activity.replyToId || context.activity.id,
         attachments: [confirmedCard],

@@ -89,6 +89,10 @@ describe('ParserService', () => {
       expect(result).toEqual({
         project_id: 1,
         project_name: 'Website Redesign',
+        task_id: null,
+        task_name: null,
+        create_new_task: false,
+        new_task_name: null,
         hours: 4.5,
         date: '2024-01-15',
         description: 'Homepage redesign work',
@@ -215,6 +219,10 @@ describe('ParserService', () => {
       expect(result).toEqual({
         project_id: null,
         project_name: null,
+        task_id: null,
+        task_name: null,
+        create_new_task: false,
+        new_task_name: null,
         hours: null,
         date: null,
         description: 'Test input',
@@ -237,6 +245,10 @@ describe('ParserService', () => {
       expect(result).toEqual({
         project_id: null,
         project_name: null,
+        task_id: null,
+        task_name: null,
+        create_new_task: false,
+        new_task_name: null,
         hours: null,
         date: null,
         description: 'Test input',

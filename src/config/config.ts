@@ -26,8 +26,6 @@ interface Config {
 
 class ConfigValidator {
   private static requiredEnvVars = [
-    'BOT_ID',
-    'BOT_PASSWORD',
     'ODOO_URL',
     'ODOO_DB',
     'ODOO_USERNAME',

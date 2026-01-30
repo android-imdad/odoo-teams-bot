@@ -56,15 +56,12 @@ describe('TimesheetCardGenerator', () => {
       // Check FactSet
       const factSet = body[2];
       expect(factSet.type).toBe('FactSet');
-      expect(factSet.facts).toHaveLength(4);
+      expect(factSet.facts.length).toBeGreaterThanOrEqual(4);
       expect(factSet.facts[0]).toEqual({
         title: 'Project:',
         value: 'Website Redesign'
       });
-      expect(factSet.facts[1]).toEqual({
-        title: 'Hours:',
-        value: '4.5 hours'
-      });
+      expect(factSet.facts.some((f: any) => f.title === 'Hours:' && f.value === '4.5 hours')).toBe(true);
     });
 
     it('should include confirm and cancel actions', () => {
@@ -73,15 +70,14 @@ describe('TimesheetCardGenerator', () => {
 
       expect(actions).toHaveLength(2);
 
-      expect(actions[0].type).toBe('Action.Execute');
+      expect(actions[0].type).toBe('Action.Submit');
       expect(actions[0].title).toBe('Confirm');
-      expect(actions[0].verb).toBe('save_timesheet');
+      expect(actions[0].data.action).toBe('save_timesheet');
       expect(actions[0].style).toBe('positive');
-      expect(actions[0].data).toEqual(mockCardData);
 
-      expect(actions[1].type).toBe('Action.Execute');
+      expect(actions[1].type).toBe('Action.Submit');
       expect(actions[1].title).toBe('Cancel');
-      expect(actions[1].verb).toBe('cancel_timesheet');
+      expect(actions[1].data.action).toBe('cancel_timesheet');
       expect(actions[1].style).toBe('destructive');
     });
 
@@ -144,7 +140,7 @@ describe('TimesheetCardGenerator', () => {
       const content = card.content;
 
       expect(content.$schema).toBe('http://adaptivecards.io/schemas/adaptive-card.json');
-      expect(content.version).toBe('1.4');
+      expect(content.version).toBe('1.3');
       expect(content.type).toBe('AdaptiveCard');
     });
   });
@@ -386,7 +382,7 @@ describe('TimesheetCardGenerator', () => {
       const successCard = TimesheetCardGenerator.createSuccessCard(mockCardData);
       const cancelledCard = TimesheetCardGenerator.createCancelledCard();
 
-      expect(confirmationCard.content.version).toBe('1.4');
+      expect(confirmationCard.content.version).toBe('1.3');
       expect(errorCard.content.version).toBe('1.4');
       expect(successCard.content.version).toBe('1.4');
       expect(cancelledCard.content.version).toBe('1.4');
@@ -490,17 +486,22 @@ describe('TimesheetCardGenerator', () => {
       const card = TimesheetCardGenerator.createConfirmationCard(mockCardData);
       const confirmAction = card.content.actions[0];
 
-      expect(confirmAction.data).toEqual(mockCardData);
+      expect(confirmAction.data.action).toBe('save_timesheet');
       expect(confirmAction.data.project_id).toBe(1);
       expect(confirmAction.data.hours).toBe(4.5);
       expect(confirmAction.data.date).toBe('2024-01-15');
+      // Verify all original data fields are included
+      expect(confirmAction.data.project_name).toBe(mockCardData.project_name);
+      expect(confirmAction.data.description).toBe(mockCardData.description);
     });
 
     it('should pass complete data object to cancel action', () => {
       const card = TimesheetCardGenerator.createConfirmationCard(mockCardData);
       const cancelAction = card.content.actions[1];
 
-      expect(cancelAction.data).toEqual(mockCardData);
+      expect(cancelAction.data.action).toBe('cancel_timesheet');
+      expect(cancelAction.data.project_id).toBe(mockCardData.project_id);
+      expect(cancelAction.data.hours).toBe(mockCardData.hours);
     });
 
     it('should preserve all fields in action data', () => {
@@ -515,7 +516,14 @@ describe('TimesheetCardGenerator', () => {
       const card = TimesheetCardGenerator.createConfirmationCard(completeData);
       const actionData = card.content.actions[0].data;
 
-      expect(actionData).toEqual(completeData);
+      // Verify action field is included
+      expect(actionData.action).toBe('save_timesheet');
+      // Verify all original data fields are preserved
+      expect(actionData.project_id).toBe(completeData.project_id);
+      expect(actionData.project_name).toBe(completeData.project_name);
+      expect(actionData.hours).toBe(completeData.hours);
+      expect(actionData.date).toBe(completeData.date);
+      expect(actionData.description).toBe(completeData.description);
     });
   });
 });

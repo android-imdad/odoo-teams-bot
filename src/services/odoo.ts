@@ -3,7 +3,8 @@ import { config } from '../config/config';
 import { logger } from '../config/logger';
 import {
   OdooConfig,
-  OdooProject
+  OdooProject,
+  OdooTask
 } from '../types/odoo.types';
 import { TimesheetEntry } from '../types';
 import { Cache } from './cache';
@@ -191,6 +192,48 @@ export class OdooService {
   }
 
   /**
+   * Get tasks for a specific project
+   */
+  async getTasks(projectId: number): Promise<OdooTask[]> {
+    try {
+      logger.info('Fetching tasks from Odoo', { projectId });
+
+      // Search for active tasks in the project
+      const taskIds = await this.executeKw(
+        'project.task',
+        'search',
+        [[['project_id', '=', projectId], ['active', '=', true]]]
+      );
+
+      if (!taskIds || taskIds.length === 0) {
+        logger.debug('No active tasks found for project', { projectId });
+        return [];
+      }
+
+      // Read task details
+      const tasks = await this.executeKw(
+        'project.task',
+        'read',
+        [taskIds, ['id', 'name', 'project_id', 'active']]
+      );
+
+      const mappedTasks: OdooTask[] = tasks.map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        project_id: t.project_id[0],
+        active: t.active
+      }));
+
+      logger.info('Tasks fetched successfully', { projectId, count: mappedTasks.length });
+      return mappedTasks;
+
+    } catch (error) {
+      logger.error('Failed to fetch tasks from Odoo', { projectId, error });
+      return []; // Return empty array on error to allow timesheet without task
+    }
+  }
+
+  /**
    * Create timesheet entry in Odoo
    */
   async logTime(entry: TimesheetEntry): Promise<number> {
@@ -209,6 +252,11 @@ export class OdooService {
         user_id: entry.user_id || uid
       };
 
+      // Include task_id if provided
+      if (entry.task_id) {
+        timesheetParams.task_id = entry.task_id;
+      }
+
       // Create the timesheet entry
       const timesheetId = await this.executeKw(
         'account.analytic.line',
@@ -219,6 +267,7 @@ export class OdooService {
       logger.info('Timesheet entry created successfully', {
         timesheetId,
         project_id: entry.project_id,
+        task_id: entry.task_id,
         hours: entry.hours
       });
 
@@ -226,6 +275,46 @@ export class OdooService {
 
     } catch (error) {
       logger.error('Failed to create timesheet entry', { entry, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Create a new task in Odoo
+   */
+  async createTask(projectId: number, taskName: string, description?: string): Promise<number> {
+    try {
+      logger.info('Creating new task in Odoo', { projectId, taskName });
+
+      // Prepare task data
+      const taskParams: any = {
+        project_id: projectId,
+        name: taskName,
+        active: true
+      };
+
+      // Add description if provided
+      if (description) {
+        taskParams.description = description;
+      }
+
+      // Create the task
+      const taskId = await this.executeKw(
+        'project.task',
+        'create',
+        [taskParams]
+      );
+
+      logger.info('Task created successfully', {
+        taskId,
+        projectId,
+        taskName
+      });
+
+      return taskId;
+
+    } catch (error) {
+      logger.error('Failed to create task', { projectId, taskName, error });
       throw error;
     }
   }

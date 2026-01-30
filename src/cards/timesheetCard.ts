@@ -25,6 +25,15 @@ export class TimesheetCardGenerator {
           wrap: true,
           spacing: 'Small'
         },
+        ...(data.create_new_task && data.new_task_name ? [
+          {
+            type: 'TextBlock',
+            text: '⚠️ New task will be created',
+            weight: 'Bolder',
+            color: 'Warning',
+            spacing: 'Small'
+          }
+        ] : []),
         {
           type: 'FactSet',
           facts: [
@@ -32,6 +41,14 @@ export class TimesheetCardGenerator {
               title: 'Project:',
               value: data.project_name
             },
+            ...(data.task_name ? [{
+              title: 'Task:',
+              value: data.task_name
+            }] : []),
+            ...(data.create_new_task && data.new_task_name ? [{
+              title: 'New Task:',
+              value: `${data.new_task_name} (will be created)`
+            }] : []),
             {
               title: 'Hours:',
               value: `${data.hours} hours`
@@ -85,7 +102,9 @@ export class TimesheetCardGenerator {
         },
         {
           type: 'TextBlock',
-          text: 'Your timesheet has been saved to Odoo.',
+          text: data.create_new_task
+            ? 'Your timesheet has been saved to Odoo. A new task was created.'
+            : 'Your timesheet has been saved to Odoo.',
           wrap: true,
           spacing: 'Small'
         },
@@ -96,6 +115,10 @@ export class TimesheetCardGenerator {
               title: 'Project:',
               value: data.project_name
             },
+            ...(data.task_name ? [{
+              title: 'Task:',
+              value: data.task_name
+            }] : []),
             {
               title: 'Hours:',
               value: `${data.hours} hours`
@@ -146,6 +169,10 @@ export class TimesheetCardGenerator {
               title: 'Project:',
               value: data.project_name
             },
+            ...(data.task_name ? [{
+              title: 'Task:',
+              value: data.task_name
+            }] : []),
             {
               title: 'Hours:',
               value: `${data.hours} hours`

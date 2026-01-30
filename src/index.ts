@@ -5,13 +5,11 @@ import { logger } from './config/logger';
 import { TimesheetBot } from './bot';
 
 // Create bot adapter
-// Auth is disabled only if credentials are not provided (for local emulator testing)
-// For ngrok/Azure testing, credentials must be set in .env
-// For Single Tenant bots, specify the tenant ID explicitly
+// For local emulator testing, no credentials needed
+// For Azure/production, set BOT_ID and BOT_PASSWORD in .env
 const adapter = new BotFrameworkAdapter({
   appId: config.bot.appId || '',
-  appPassword: config.bot.appPassword || '',
-  channelAuthTenant: '9e95943a-8a8a-4062-b8b8-4339c2e66f74'
+  appPassword: config.bot.appPassword || ''
 });
 
 // Error handler for adapter
@@ -60,7 +58,8 @@ server.post('/api/messages', async (req, res) => {
     method: req.method,
     url: req.url,
     contentType: req.header('content-type'),
-    authHeader: req.header('authorization') ? 'present' : 'missing'
+    authHeader: req.header('authorization') ? 'present' : 'missing',
+    body: req.body
   });
 
   await adapter.process(req, res, (context) => bot.run(context));
