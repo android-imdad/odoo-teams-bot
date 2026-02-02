@@ -6,7 +6,8 @@ A Microsoft Teams bot that uses AI to parse natural language timesheet entries a
 
 - **Natural Language Processing**: Uses Google Gemini AI to understand timesheet entries in plain English
 - **Interactive Confirmation**: Adaptive Cards provide visual confirmation before saving
-- **Automatic Project Matching**: Intelligently matches project names and codes from your Odoo instance
+- **Automatic Project & Task Matching**: Intelligently matches project names and task names from your Odoo instance using fuzzy search
+- **Smart Task Filtering**: Fuse.js filters thousands of tasks to the top 5 matches before AI parsing - reduces token usage by 99%+
 - **Flexible Input**: Supports various date and hour formats
 - **Comprehensive Logging**: Advanced Winston-based logging with file rotation
 - **Docker Ready**: Containerized deployment for easy setup and scaling
@@ -161,7 +162,8 @@ src/
 ├── services/
 │   ├── odoo.ts           # Odoo XML-RPC integration
 │   ├── parser.ts         # Gemini AI parsing
-│   └── cache.ts          # In-memory caching
+│   ├── cache.ts          # In-memory caching
+│   └── taskFilter.ts     # Fuse.js fuzzy task filtering
 ├── cards/
 │   └── timesheetCard.ts  # Adaptive Card generators
 ├── types/                # TypeScript type definitions
@@ -280,6 +282,27 @@ src/
                   │
                   ▼
     ┌────────────────────────────────────────────────────────────────────┐
+    │                   STEP 2b: FILTER TASKS (Optional)                 │
+    │                                                                    │
+    │    ┌─────────────────────────────────────────────────────┐         │
+    │    │  If project identified:                             │         │
+    │    │  ┌───────────────────────────────────────────────┐  │         │
+    │    │  │ 1. Fetch all tasks from Odoo                  │  │         │
+    │    │  │ 2. Filter with Fuse.js fuzzy search           │  │         │
+    │    │  │ 3. Return top 5 most relevant tasks           │  │         │
+    │    │  └───────────────────────────────────────────────┘  │         │
+    │    └──────────┬──────────────────────────────────────────┘         │
+    │               │                                                    │
+    │               ▼                                                    │
+    │    ┌─────────────────────────────────────────────────────┐         │
+    │    │  10,000 tasks → Top 5 matches                       │         │
+    │    │  "homepage bug" matches "Homepage Redesign"         │         │
+    │    │  Reduces AI tokens by 99%+                          │         │
+    │    └──────────┬──────────────────────────────────────────┘         │
+    └───────────────┼────────────────────────────────────────────────────┘
+                    │
+                    ▼
+    ┌────────────────────────────────────────────────────────────────────┐
     │                    STEP 3: PARSE WITH GEMINI AI                    │
     │                                                                    │
     │    ┌─────────────────────┐                                         │
@@ -293,6 +316,7 @@ src/
     │    │  ┌─────────────────────────────────────────┐    │             │
     │    │  │ - User text                             │    │             │
     │    │  │ - Available projects (id, name, code)   │    │             │
+    │    │  │ - Filtered tasks (top 5 matches)        │    │             │
     │    │  │ - Today's date                          │    │             │
     │    │  │ - Instructions for extraction           │    │             │
     │    │  └─────────────────────────────────────────┘    │             │
@@ -638,12 +662,18 @@ docker-compose logs odoo-teams-bot
    - Reduces Odoo API calls
    - Automatic cache cleanup every 5 minutes
 
-2. **Async Operations**
+2. **Task Filtering**
+   - Fuse.js filters tasks locally (no extra API calls)
+   - Reduces AI token usage from 10,000 tasks to top 5 matches
+   - Fuzzy matching handles typos and partial matches
+   - 99%+ token cost reduction for projects with many tasks
+
+3. **Async Operations**
    - Non-blocking I/O throughout
    - Typing indicators during processing
    - Promise-based architecture
 
-3. **Resource Limits**
+4. **Resource Limits**
    - Log rotation prevents disk bloat
    - Memory-efficient caching
    - Docker health checks monitor status

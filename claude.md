@@ -11,6 +11,7 @@ Odoo Teams Bot - A production-ready Microsoft Teams bot that uses AI to parse na
 - **Server**: Restify
 - **AI**: Google Gemini (generative-ai)
 - **ERP Integration**: Odoo XML-RPC (xmlrpc)
+- **Task Matching**: Fuse.js (fuzzy search for task filtering)
 - **Logging**: Winston with file rotation
 - **UI**: Adaptive Cards
 - **Testing**: Jest + ts-jest
@@ -31,6 +32,7 @@ src/
 │   ├── parser.ts                 # Gemini AI for natural language parsing
 │   ├── cache.ts                  # In-memory project cache (TTL: 1hr)
 │   ├── responseCache.ts          # AI response caching for cost optimization
+│   ├── taskFilter.ts             # Fuse.js fuzzy search for task filtering
 │   ├── audit.ts                  # Audit trail logging for compliance
 │   ├── health.ts                 # Health checks and monitoring endpoints
 │   └── resilience.ts             # Graceful degradation and offline queuing
@@ -63,6 +65,7 @@ src/
 - **Health Monitoring** (`services/health.ts`): `/health` and `/metrics` endpoints
 
 ### Performance
+- **Task Filtering** (`services/taskFilter.ts`): Fuse.js fuzzy search to filter tasks before AI parsing - reduces token usage from 10,000 tasks to top 5 matches
 - **Response Caching** (`services/responseCache.ts`): Cache AI responses to reduce API costs
 - **Project Caching** (`services/cache.ts`): In-memory cache with TTL
 
@@ -196,3 +199,30 @@ The bot uses a comprehensive error handling system:
 - **Service Unavailable**: Graceful degradation with offline queue
 - **Validation Errors**: User-friendly error messages
 - **Authentication Errors**: Logged for admin review
+
+## Task Filtering
+
+The bot uses **Fuse.js** to intelligently filter tasks before sending them to the AI parser:
+
+### How It Works
+1. User sends message: "4 hours on Website project Homepage Redesign"
+2. Bot fetches all tasks for the identified project (could be 10,000+)
+3. **Fuse.js filters** tasks using fuzzy matching against the user's query
+4. Only the **top 5 most relevant tasks** are sent to Gemini AI
+5. AI parses with a focused task list (~100 tokens instead of ~200,000)
+
+### Benefits
+- **Cost Reduction**: Reduces AI token usage by 99%+ when projects have many tasks
+- **Performance**: Fuse.js runs locally with no additional API calls
+- **Accuracy**: Fuzzy matching handles typos, partial matches, and word variations
+- **Scalability**: Works efficiently regardless of project size
+
+### Configuration
+```typescript
+// Default settings in taskFilter.ts
+{
+  limit: 5,           // Return top 5 matches
+  threshold: 0.6,     // Fuzzy match tolerance (0-1)
+  keys: ['name']      // Search in task name field
+}
+```

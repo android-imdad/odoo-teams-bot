@@ -526,4 +526,140 @@ describe('TimesheetCardGenerator', () => {
       expect(actionData.description).toBe(completeData.description);
     });
   });
+
+  describe('createConfirmedCard', () => {
+    it('should create a confirmed state card', () => {
+      const card = TimesheetCardGenerator.createConfirmedCard(mockCardData);
+
+      expect(card).toBeDefined();
+      expect(card.contentType).toBe('application/vnd.microsoft.card.adaptive');
+      expect(card.content.body[0].text).toBe('\u2713 Timesheet Confirmed');
+      expect(card.content.body[0].color).toBe('Good');
+    });
+
+    it('should include task information when provided', () => {
+      const dataWithTask = {
+        ...mockCardData,
+        task_id: 10,
+        task_name: 'Development'
+      };
+
+      const card = TimesheetCardGenerator.createConfirmedCard(dataWithTask);
+      const factSet = card.content.body[2];
+
+      expect(factSet.facts).toHaveLength(5);
+      expect(factSet.facts[1]).toEqual({
+        title: 'Task:',
+        value: 'Development'
+      });
+    });
+
+    it('should show new task message when create_new_task is true', () => {
+      const dataWithNewTask = {
+        ...mockCardData,
+        create_new_task: true,
+        new_task_name: 'New Feature'
+      };
+
+      const card = TimesheetCardGenerator.createConfirmedCard(dataWithNewTask);
+
+      expect(card.content.body[1].text).toContain('new task was created');
+    });
+
+    it('should show standard message when not creating new task', () => {
+      const card = TimesheetCardGenerator.createConfirmedCard(mockCardData);
+
+      expect(card.content.body[1].text).toBe('Your timesheet has been saved to Odoo.');
+    });
+
+    it('should include description in confirmed card', () => {
+      const card = TimesheetCardGenerator.createConfirmedCard(mockCardData);
+      const factSet = card.content.body[2];
+
+      const descriptionFact = factSet.facts.find((f: any) => f.title === 'Description:');
+      expect(descriptionFact).toBeDefined();
+      expect(descriptionFact.value).toBe(mockCardData.description);
+    });
+
+    it('should not have actions in confirmed card', () => {
+      const card = TimesheetCardGenerator.createConfirmedCard(mockCardData);
+
+      expect(card.content.actions).toBeUndefined();
+    });
+
+    it('should handle missing task gracefully', () => {
+      const card = TimesheetCardGenerator.createConfirmedCard(mockCardData);
+      const factSet = card.content.body[2];
+
+      const taskFact = factSet.facts.find((f: any) => f.title === 'Task:');
+      expect(taskFact).toBeUndefined();
+    });
+  });
+
+  describe('createCancelledStateCard', () => {
+    it('should create a cancelled state card', () => {
+      const card = TimesheetCardGenerator.createCancelledStateCard(mockCardData);
+
+      expect(card).toBeDefined();
+      expect(card.contentType).toBe('application/vnd.microsoft.card.adaptive');
+      expect(card.content.body[0].text).toBe('\u2717 Timesheet Cancelled');
+      expect(card.content.body[0].color).toBe('Warning');
+    });
+
+    it('should include task information when provided', () => {
+      const dataWithTask = {
+        ...mockCardData,
+        task_id: 10,
+        task_name: 'Development'
+      };
+
+      const card = TimesheetCardGenerator.createCancelledStateCard(dataWithTask);
+      const factSet = card.content.body[2];
+
+      expect(factSet.facts).toHaveLength(4);
+      expect(factSet.facts[1]).toEqual({
+        title: 'Task:',
+        value: 'Development'
+      });
+    });
+
+    it('should have hidden factset', () => {
+      const card = TimesheetCardGenerator.createCancelledStateCard(mockCardData);
+      const factSet = card.content.body[2];
+
+      expect(factSet.isVisible).toBe(false);
+    });
+
+    it('should not have description in cancelled card', () => {
+      const card = TimesheetCardGenerator.createCancelledStateCard(mockCardData);
+      const factSet = card.content.body[2];
+
+      const descriptionFact = factSet.facts.find((f: any) => f.title === 'Description:');
+      expect(descriptionFact).toBeUndefined();
+    });
+
+    it('should not have actions in cancelled state card', () => {
+      const card = TimesheetCardGenerator.createCancelledStateCard(mockCardData);
+
+      expect(card.content.actions).toBeUndefined();
+    });
+
+    it('should include cancellation message', () => {
+      const card = TimesheetCardGenerator.createCancelledStateCard(mockCardData);
+
+      expect(card.content.body[1].text).toBe('No timesheet entry was created.');
+    });
+
+    it('should handle null values gracefully', () => {
+      const dataWithNulls = {
+        ...mockCardData,
+        task_id: undefined,
+        task_name: undefined
+      };
+
+      expect(() => {
+        TimesheetCardGenerator.createCancelledStateCard(dataWithNulls);
+      }).not.toThrow();
+    });
+  });
 });

@@ -5,6 +5,7 @@ import {
 import { logger } from './config/logger';
 import { odooService } from './services/odoo';
 import { parserService } from './services/parser';
+import { filterTasksByQuery } from './services/taskFilter';
 import { TimesheetCardGenerator } from './cards/timesheetCard';
 import { TimesheetCardData } from './types/bot.types';
 import { TimesheetEntry } from './types';
@@ -86,13 +87,22 @@ export class TimesheetBot extends TeamsActivityHandler {
       // First pass: parse to identify project
       const initialParse = await parserService.parseText(userText, projects);
 
-      // If project identified, fetch tasks for that project
+      // If project identified, fetch and filter tasks for that project
       let tasks: any[] = [];
       if (initialParse.project_id) {
-        tasks = await odooService.getTasks(initialParse.project_id);
+        const allTasks = await odooService.getTasks(initialParse.project_id);
+
+        // Use Fuse.js to filter tasks based on user query - return top 5 matches
+        tasks = filterTasksByQuery(allTasks, userText, { limit: 5 });
+
+        logger.info('Tasks filtered for parsing', {
+          totalTasks: allTasks.length,
+          filteredTasks: tasks.length,
+          projectId: initialParse.project_id
+        });
       }
 
-      // Second pass: parse with tasks included
+      // Second pass: parse with filtered tasks included
       const parsed = await parserService.parseText(userText, projects, tasks);
 
       // Check if parsing was successful
