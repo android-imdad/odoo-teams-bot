@@ -3,10 +3,83 @@ import { BotFrameworkAdapter } from 'botbuilder';
 import { config } from './config/config';
 import { logger } from './config/logger';
 import { TimesheetBot } from './bot';
+import { TokenStorageService } from './services/tokenStorage';
+import { OAuthService } from './services/oauth';
+import { ApiKeyAuthService } from './services/apiKeyAuth';
+import { TokenRefreshJob } from './services/tokenRefresh';
+import { registerOAuthRoutes } from './routes/oauth';
+import { OdooService } from './services/odoo';
+import path from 'path';
+import fs from 'fs';
+
+// Authentication-related services (initialized based on config)
+let tokenStorage: TokenStorageService | undefined;
+let oauthService: OAuthService | undefined;
+let apiKeyAuthService: ApiKeyAuthService | undefined;
+let tokenRefreshJob: TokenRefreshJob | undefined;
+let odooService: OdooService;
+
+// Authentication mode: 'service_account' | 'oauth' | 'api_key'
+const AUTH_MODE = process.env.AUTH_MODE || 'api_key'; // Default to API key for multi-user support
+
+/**
+ * Initialize authentication services based on AUTH_MODE
+ */
+async function initializeAuth(): Promise<void> {
+  // Initialize token storage for all modes except service_account
+  if (AUTH_MODE !== 'service_account') {
+    try {
+      const dbPath = config.tokenStorage?.dbPath || './data/tokens.db';
+      const dbDir = path.dirname(dbPath);
+      if (!fs.existsSync(dbDir)) {
+        fs.mkdirSync(dbDir, { recursive: true });
+        logger.info('Created data directory', { path: dbDir });
+      }
+
+      tokenStorage = new TokenStorageService({ dbPath, encryptionKey: config.tokenStorage?.encryptionKey || 'default-key-32-chars-long!!!!!' });
+      await tokenStorage.initialize();
+      logger.info('Token storage initialized');
+    } catch (error) {
+      logger.error('Failed to initialize token storage', { error });
+      throw error;
+    }
+  }
+
+  // Initialize OAuth if enabled
+  if (AUTH_MODE === 'oauth' && config.oauthEnabled && config.oauth) {
+    try {
+      oauthService = new OAuthService(config.oauth, tokenStorage!);
+      logger.info('OAuth service initialized');
+
+      tokenRefreshJob = new TokenRefreshJob(oauthService, tokenStorage!);
+      tokenRefreshJob.start();
+      logger.info('Token refresh job started');
+    } catch (error) {
+      logger.error('Failed to initialize OAuth services', { error });
+      throw error;
+    }
+  }
+
+  // Initialize API Key auth if enabled
+  if (AUTH_MODE === 'api_key' && tokenStorage) {
+    try {
+      apiKeyAuthService = new ApiKeyAuthService(tokenStorage);
+      logger.info('API Key authentication service initialized');
+    } catch (error) {
+      logger.error('Failed to initialize API Key auth service', { error });
+      throw error;
+    }
+  }
+
+  if (AUTH_MODE === 'service_account') {
+    logger.info('Using service account mode (single user)');
+  }
+}
+
+// Bot instance (created after services are initialized)
+let bot: TimesheetBot;
 
 // Create bot adapter
-// For local emulator testing, no credentials needed
-// For Azure/production, set BOT_ID and BOT_PASSWORD in .env
 const adapter = new BotFrameworkAdapter({
   appId: config.bot.appId || '',
   appPassword: config.bot.appPassword || ''
@@ -31,60 +104,151 @@ adapter.onTurnError = async (context, error) => {
   );
 };
 
-// Create bot instance
-const bot = new TimesheetBot();
-
 // Create HTTP server
 const server = restify.createServer({
   name: 'Odoo Teams Bot',
   version: '1.0.0'
 });
 
+server.use(restify.plugins.queryParser());
 server.use(restify.plugins.bodyParser());
 
 // Health check endpoint
 server.get('/health', (_req, res, next) => {
-  res.send(200, {
+  const healthStatus: any = {
     status: 'healthy',
-    timestamp: new Date().toISOString()
-  });
+    timestamp: new Date().toISOString(),
+    authMode: AUTH_MODE
+  };
+
+  if (tokenStorage) {
+    healthStatus.tokenStorage = 'connected';
+  }
+
+  res.send(200, healthStatus);
   next();
 });
 
-// Bot endpoint
-server.post('/api/messages', async (req, res) => {
-  // Log incoming requests for debugging
-  logger.info('Incoming bot request', {
-    method: req.method,
-    url: req.url,
-    contentType: req.header('content-type'),
-    authHeader: req.header('authorization') ? 'present' : 'missing',
-    body: req.body
+// Bot endpoint (registered after bot is created)
+let botEndpointRegistered = false;
+
+function registerBotEndpoint(): void {
+  if (botEndpointRegistered) return;
+
+  server.post('/api/messages', async (req, res) => {
+    // Log incoming requests for debugging
+    logger.info('Incoming bot request', {
+      method: req.method,
+      url: req.url,
+      contentType: req.header('content-type'),
+      authHeader: req.header('authorization') ? 'present' : 'missing',
+      body: req.body
+    });
+
+    await adapter.process(req, res, (context) => bot.run(context));
   });
 
-  await adapter.process(req, res, (context) => bot.run(context));
-});
+  botEndpointRegistered = true;
+}
 
-// Start server
-server.listen(config.bot.port, () => {
-  logger.info(`Bot server started`, {
-    port: config.bot.port,
-    environment: config.environment
-  });
-  console.log(`Bot server listening on port ${config.bot.port}`);
-});
+// Start server and initialize services
+async function startServer(): Promise<void> {
+  try {
+    // Initialize authentication services
+    await initializeAuth();
+
+    // Initialize Odoo service with appropriate auth services
+    odooService = new OdooService(config.odoo, oauthService, apiKeyAuthService);
+    logger.info('Odoo service initialized', { authMode: AUTH_MODE });
+
+    // Create bot instance with initialized services
+    const useApiKeyAuth = AUTH_MODE === 'api_key';
+    bot = new TimesheetBot(oauthService, apiKeyAuthService, odooService, useApiKeyAuth);
+
+    // Register bot endpoint
+    registerBotEndpoint();
+
+    // Register OAuth routes if enabled
+    if (oauthService) {
+      registerOAuthRoutes(server, oauthService, { adapter, bot });
+    }
+
+    // Start HTTP server
+    server.listen(config.bot.port, () => {
+      // Show prominent warning for service account mode
+      if (AUTH_MODE === 'service_account') {
+        console.warn('\n' + '='.repeat(70));
+        console.warn('⚠️  WARNING: RUNNING IN SERVICE ACCOUNT MODE (TESTING ONLY)');
+        console.warn('='.repeat(70));
+        console.warn('All users will share the same Odoo account.');
+        console.warn('Timesheets will be logged as: ' + config.odoo.username);
+        console.warn('This mode is NOT suitable for production use.');
+        console.warn('Use API Key or OAuth authentication for multi-user support.');
+        console.warn('='.repeat(70) + '\n');
+
+        logger.warn('Service account mode active - all users share same Odoo account', {
+          username: config.odoo.username
+        });
+      }
+
+      logger.info(`Bot server started`, {
+        port: config.bot.port,
+        environment: config.environment,
+        authMode: AUTH_MODE
+      });
+      console.log(`Bot server listening on port ${config.bot.port}`);
+      if (AUTH_MODE === 'oauth') {
+        console.log(`OAuth endpoints available at ${config.bot.publicUrl}/auth/oauth/*`);
+      } else if (AUTH_MODE === 'api_key') {
+        console.log(`API Key authentication enabled for multi-user support`);
+      } else {
+        console.log(`Service account mode (single user)`);
+      }
+    });
+
+  } catch (error) {
+    logger.error('Failed to start server', { error });
+    process.exit(1);
+  }
+}
 
 // Graceful shutdown
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   logger.info('Received SIGINT, shutting down gracefully');
+
+  // Stop token refresh job
+  if (tokenRefreshJob) {
+    tokenRefreshJob.stop();
+    logger.info('Token refresh job stopped');
+  }
+
+  // Close token storage
+  if (tokenStorage) {
+    await tokenStorage.close();
+    logger.info('Token storage closed');
+  }
+
   server.close(() => {
     logger.info('Server closed');
     process.exit(0);
   });
 });
 
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   logger.info('Received SIGTERM, shutting down gracefully');
+
+  // Stop token refresh job
+  if (tokenRefreshJob) {
+    tokenRefreshJob.stop();
+    logger.info('Token refresh job stopped');
+  }
+
+  // Close token storage
+  if (tokenStorage) {
+    await tokenStorage.close();
+    logger.info('Token storage closed');
+  }
+
   server.close(() => {
     logger.info('Server closed');
     process.exit(0);
@@ -101,3 +265,6 @@ process.on('unhandledRejection', (reason, promise) => {
   logger.error('Unhandled rejection', { reason, promise });
   process.exit(1);
 });
+
+// Start the server
+startServer();

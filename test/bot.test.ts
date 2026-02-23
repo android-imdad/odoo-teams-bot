@@ -3,14 +3,16 @@
  */
 
 import { TimesheetBot } from '../src/bot';
-import { odooService } from '../src/services/odoo';
+import { OdooService } from '../src/services/odoo';
+import { ApiKeyAuthService } from '../src/services/apiKeyAuth';
 import { parserService } from '../src/services/parser';
 import { TimesheetCardGenerator } from '../src/cards/timesheetCard';
 import { logger } from '../src/config/logger';
-import { TurnContext, Activity, ChannelAccount } from 'botbuilder';
+import { TurnContext, Activity } from 'botbuilder';
 import { TimesheetCardData } from '../src/types/bot.types';
 
 jest.mock('../src/services/odoo');
+jest.mock('../src/services/apiKeyAuth');
 jest.mock('../src/services/parser');
 jest.mock('../src/cards/timesheetCard');
 jest.mock('../src/config/logger');
@@ -20,10 +22,26 @@ describe('TimesheetBot', () => {
   let mockContext: Partial<TurnContext>;
   let sendActivityMock: jest.Mock;
   let updateActivityMock: jest.Mock;
+  let mockOdooService: jest.Mocked<OdooService>;
+  let mockApiKeyAuthService: jest.Mocked<ApiKeyAuthService>;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    bot = new TimesheetBot();
+    mockOdooService = new OdooService({ url: 'https://test.odoo.com', db: 'test', username: '', password: '' }) as jest.Mocked<OdooService>;
+    mockApiKeyAuthService = new ApiKeyAuthService({} as any) as jest.Mocked<ApiKeyAuthService>;
+
+    // Mock authenticated user for message processing tests
+    mockApiKeyAuthService.isAuthenticated = jest.fn().mockResolvedValue(true);
+    mockApiKeyAuthService.getSession = jest.fn().mockResolvedValue({
+      teamsUserId: 'user-1',
+      odooUsername: 'test@example.com',
+      odooUserId: 42,
+      apiKey: 'test-api-key',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+
+    bot = new TimesheetBot(undefined, mockApiKeyAuthService, mockOdooService, true);
 
     sendActivityMock = jest.fn().mockResolvedValue(undefined);
     updateActivityMock = jest.fn().mockResolvedValue(undefined);
@@ -49,12 +67,15 @@ describe('TimesheetBot', () => {
   describe('constructor', () => {
     it('should initialize the bot', () => {
       expect(bot).toBeDefined();
-      expect(logger.info).toHaveBeenCalledWith('TimesheetBot initialized');
+      expect(logger.info).toHaveBeenCalledWith('TimesheetBot initialized', expect.objectContaining({ oauthEnabled: false }));
     });
   });
 
   describe('onConversationUpdateActivity', () => {
-    it('should send welcome message when member added', async () => {
+    it('should send auth options card when new unauthenticated member added', async () => {
+      // Mock unauthenticated user
+      mockApiKeyAuthService.isAuthenticated = jest.fn().mockResolvedValue(false);
+
       const context = {
         ...mockContext,
         activity: {
@@ -71,10 +92,41 @@ describe('TimesheetBot', () => {
       await (bot as any).onConversationUpdateActivity(context);
 
       expect(sendActivityMock).toHaveBeenCalledWith(
-        'Welcome to the Odoo Timesheet Bot! Send a message like "Log 2 hours on Project X" to get started.'
+        expect.objectContaining({
+          text: expect.stringContaining('Welcome to the Odoo Timesheet Bot'),
+          attachments: expect.any(Array)
+        })
       );
       expect(logger.info).toHaveBeenCalledWith(
-        'Welcome message sent to new member',
+        'Auth options card sent to new member',
+        { memberId: 'user-2' }
+      );
+    });
+
+    it('should send welcome back message when authenticated member added', async () => {
+      // Mock authenticated user
+      mockApiKeyAuthService.isAuthenticated = jest.fn().mockResolvedValue(true);
+
+      const context = {
+        ...mockContext,
+        activity: {
+          ...mockContext.activity,
+          type: 'conversationUpdate',
+          membersAdded: [
+            { id: 'user-2', name: 'New User' }
+          ],
+          recipient: { id: 'bot-1', name: 'Bot' },
+        } as Activity,
+      } as TurnContext;
+
+      // Access protected method
+      await (bot as any).onConversationUpdateActivity(context);
+
+      expect(sendActivityMock).toHaveBeenCalledWith(
+        expect.stringContaining('Welcome back')
+      );
+      expect(logger.info).toHaveBeenCalledWith(
+        'Welcome message sent to authenticated member',
         { memberId: 'user-2' }
       );
     });
@@ -135,11 +187,11 @@ describe('TimesheetBot', () => {
         content: { type: 'AdaptiveCard', version: '1.3' }
       });
 
-      (odooService.logTime as jest.Mock).mockResolvedValue(123);
+      (mockOdooService.logTime as jest.Mock).mockResolvedValue(123);
 
       await (bot as any).handleMessage(context);
 
-      expect(odooService.logTime).toHaveBeenCalled();
+      expect(mockOdooService.logTime).toHaveBeenCalled();
       expect(updateActivityMock).toHaveBeenCalled();
     });
 
@@ -193,7 +245,7 @@ describe('TimesheetBot', () => {
         activity: {
           ...mockContext.activity,
           text: undefined,
-        } as Activity,
+        } as unknown as Activity,
       } as TurnContext;
 
       await (bot as any).handleMessage(context);
@@ -202,7 +254,7 @@ describe('TimesheetBot', () => {
     });
 
     it('should send typing indicator', async () => {
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Project X' }]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Project X' }]);
       (parserService.parseText as jest.Mock).mockResolvedValue({
         project_id: 1,
         project_name: 'Project X',
@@ -222,7 +274,7 @@ describe('TimesheetBot', () => {
     });
 
     it('should handle no projects available', async () => {
-      (odooService.getProjects as jest.Mock).mockResolvedValue([]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([]);
 
       await (bot as any).handleMessage(mockContext as TurnContext);
 
@@ -232,8 +284,8 @@ describe('TimesheetBot', () => {
     });
 
     it('should handle parsing with tasks', async () => {
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Project X' }]);
-      (odooService.getTasks as jest.Mock).mockResolvedValue([{ id: 1, name: 'Task A' }]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Project X' }]);
+      (mockOdooService.getTasks as jest.Mock).mockResolvedValue([{ id: 1, name: 'Task A' }]);
       (parserService.parseText as jest.Mock)
         .mockResolvedValueOnce({ project_id: 1, project_name: 'Project X' })
         .mockResolvedValueOnce({
@@ -253,12 +305,12 @@ describe('TimesheetBot', () => {
 
       await (bot as any).handleMessage(mockContext as TurnContext);
 
-      expect(odooService.getTasks).toHaveBeenCalledWith(1);
+      expect(mockOdooService.getTasks).toHaveBeenCalledWith(1);
       expect(parserService.parseText).toHaveBeenCalledTimes(2);
     });
 
     it('should show error card when parsing fails', async () => {
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Project X' }]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Project X' }]);
       (parserService.parseText as jest.Mock).mockResolvedValue({
         error: 'Could not parse',
         project_id: null,
@@ -280,7 +332,7 @@ describe('TimesheetBot', () => {
     });
 
     it('should handle general errors', async () => {
-      (odooService.getProjects as jest.Mock).mockRejectedValue(new Error('Connection failed'));
+      (mockOdooService.getProjects as jest.Mock).mockRejectedValue(new Error('Connection failed'));
 
       await (bot as any).handleMessage(mockContext as TurnContext);
 
@@ -304,7 +356,7 @@ describe('TimesheetBot', () => {
     };
 
     it('should save timesheet successfully', async () => {
-      (odooService.logTime as jest.Mock).mockResolvedValue(123);
+      (mockOdooService.logTime as jest.Mock).mockResolvedValue(123);
       (TimesheetCardGenerator.createConfirmedCard as jest.Mock).mockReturnValue({
         contentType: 'application/vnd.microsoft.card.adaptive',
         content: { type: 'AdaptiveCard', version: '1.3' }
@@ -312,13 +364,16 @@ describe('TimesheetBot', () => {
 
       await (bot as any).handleSaveTimesheet(mockContext as TurnContext, mockCardData);
 
-      expect(odooService.logTime).toHaveBeenCalledWith(expect.objectContaining({
-        project_id: 1,
-        project_name: 'Test Project',
-        hours: 2,
-        date: '2024-01-15',
-        description: 'Test work'
-      }));
+      expect(mockOdooService.logTime).toHaveBeenCalledWith(
+        expect.objectContaining({
+          project_id: 1,
+          project_name: 'Test Project',
+          hours: 2,
+          date: '2024-01-15',
+          description: 'Test work'
+        }),
+        'user-1'
+      );
       expect(updateActivityMock).toHaveBeenCalled();
     });
 
@@ -329,8 +384,8 @@ describe('TimesheetBot', () => {
         new_task_name: 'New Task'
       };
 
-      (odooService.createTask as jest.Mock).mockResolvedValue(5);
-      (odooService.logTime as jest.Mock).mockResolvedValue(123);
+      (mockOdooService.createTask as jest.Mock).mockResolvedValue(5);
+      (mockOdooService.logTime as jest.Mock).mockResolvedValue(123);
       (TimesheetCardGenerator.createConfirmedCard as jest.Mock).mockReturnValue({
         contentType: 'application/vnd.microsoft.card.adaptive',
         content: { type: 'AdaptiveCard', version: '1.3' }
@@ -338,15 +393,18 @@ describe('TimesheetBot', () => {
 
       await (bot as any).handleSaveTimesheet(mockContext as TurnContext, cardDataWithNewTask);
 
-      expect(odooService.createTask).toHaveBeenCalledWith(
+      expect(mockOdooService.createTask).toHaveBeenCalledWith(
         1,
         'New Task',
         'Test work'
       );
-      expect(odooService.logTime).toHaveBeenCalledWith(expect.objectContaining({
-        task_id: 5,
-        task_name: 'New Task'
-      }));
+      expect(mockOdooService.logTime).toHaveBeenCalledWith(
+        expect.objectContaining({
+          task_id: 5,
+          task_name: 'New Task'
+        }),
+        'user-1'
+      );
     });
 
     it('should handle task creation failure gracefully', async () => {
@@ -356,8 +414,8 @@ describe('TimesheetBot', () => {
         new_task_name: 'New Task'
       };
 
-      (odooService.createTask as jest.Mock).mockRejectedValue(new Error('Create failed'));
-      (odooService.logTime as jest.Mock).mockResolvedValue(123);
+      (mockOdooService.createTask as jest.Mock).mockRejectedValue(new Error('Create failed'));
+      (mockOdooService.logTime as jest.Mock).mockResolvedValue(123);
       (TimesheetCardGenerator.createErrorCard as jest.Mock).mockReturnValue({
         contentType: 'application/vnd.microsoft.card.adaptive',
         content: { type: 'AdaptiveCard', version: '1.3' }
@@ -370,14 +428,17 @@ describe('TimesheetBot', () => {
         expect.any(Object)
       );
       expect(sendActivityMock).toHaveBeenCalled();
-      expect(odooService.logTime).toHaveBeenCalledWith(expect.objectContaining({
-        task_id: undefined,
-        task_name: undefined
-      }));
+      expect(mockOdooService.logTime).toHaveBeenCalledWith(
+        expect.objectContaining({
+          task_id: undefined,
+          task_name: undefined
+        }),
+        'user-1'
+      );
     });
 
     it('should handle save errors', async () => {
-      (odooService.logTime as jest.Mock).mockRejectedValue(new Error('Save failed'));
+      (mockOdooService.logTime as jest.Mock).mockRejectedValue(new Error('Save failed'));
       (TimesheetCardGenerator.createErrorCard as jest.Mock).mockReturnValue({
         contentType: 'application/vnd.microsoft.card.adaptive',
         content: { type: 'AdaptiveCard', version: '1.3' }

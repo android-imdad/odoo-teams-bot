@@ -2,7 +2,7 @@
  * Tests for configuration validation
  */
 
-import { configValidator, ValidationResult, ConfigSchema } from '../../src/config/configValidation';
+import { configValidator } from '../../src/config/configValidation';
 import { logger } from '../../src/config/logger';
 
 jest.mock('../../src/config/logger');
@@ -114,13 +114,6 @@ describe('ConfigValidator', () => {
     });
 
     it('should validate email type correctly', () => {
-      const schema: ConfigSchema = {
-        required: true,
-        type: 'email',
-        envVar: 'TEST_EMAIL',
-        description: 'Test email'
-      };
-
       process.env.BOT_ID = 'test-bot-id';
       process.env.BOT_PASSWORD = 'test-bot-password';
       process.env.ODOO_URL = 'https://test.odoo.com';

@@ -7,6 +7,7 @@ import { logger } from '../config/logger';
 import { TimesheetEntry } from '../types';
 import { auditService, AuditEventType } from './audit';
 import { withRetry, RetryPresets } from '../utils/retry';
+import { OdooService } from './odoo';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -30,14 +31,16 @@ export interface QueuedOperation {
   retryCount: number;
 }
 
-export class ResilienceService {
+class ResilienceService {
   private config: ResilienceConfig;
   private offlineQueue: QueuedOperation[] = [];
   private odooAvailable: boolean = true;
   private lastOdooCheck: number = 0;
   private processingQueue: boolean = false;
+  private odooService: OdooService;
 
-  constructor(config: Partial<ResilienceConfig> = {}) {
+  constructor(odooService: OdooService, config: Partial<ResilienceConfig> = {}) {
+    this.odooService = odooService;
     this.config = {
       enableOfflineMode: config.enableOfflineMode ?? true,
       offlineQueuePath: config.offlineQueuePath ?? path.join(process.cwd(), 'data', 'offline-queue.json'),
@@ -108,14 +111,13 @@ export class ResilienceService {
     this.processingQueue = true;
 
     try {
-      const { odooService } = await import('./odoo');
       const processed: string[] = [];
 
       for (const operation of this.offlineQueue) {
         try {
           if (operation.operation === 'create_timesheet') {
             await withRetry(
-              () => odooService.logTime(operation.data),
+              () => this.odooService.logTime(operation.data, operation.userId),
               RetryPresets.STANDARD
             );
 
@@ -135,7 +137,7 @@ export class ResilienceService {
           operation.retryCount++;
 
           if (operation.retryCount >= 5) {
-            logger.error('Dropping operation after max retries', {
+            logger.error('Operation failed after all retries', {
               operationId: operation.id,
               retryCount: operation.retryCount
             });
@@ -264,8 +266,7 @@ export class ResilienceService {
     }
 
     try {
-      const { odooService } = await import('./odoo');
-      await odooService.getProjects();
+      await this.odooService.getProjects();
       this.odooAvailable = true;
       this.lastOdooCheck = now;
       return true;
@@ -325,27 +326,5 @@ export class ResilienceService {
   }
 }
 
-// Export singleton instance
-export const resilienceService = new ResilienceService({
-  enableOfflineMode: true,
-  maxQueueSize: 1000,
-  enableGracefulDegradation: true
-});
-
-/**
- * Wrapper function to execute operations with resilience
- */
-export async function resilientOperation<T>(
-  operation: () => Promise<T>,
-  options: {
-    fallback?: () => T | Promise<T>;
-    operationName?: string;
-    userId?: string;
-    enableQueue?: boolean;
-    queueData?: any;
-  } = {}
-): Promise<T> {
-  const { fallback = (() => { throw new Error('Operation failed and no fallback provided'); }) } = options;
-
-  return resilienceService.executeWithFallback(operation, fallback, options);
-}
+// Note: ResilienceService should be instantiated with OdooService and exported from index.ts
+export { ResilienceService };

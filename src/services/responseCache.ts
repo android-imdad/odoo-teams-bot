@@ -158,8 +158,6 @@ export class ResponseCache<T> {
     const { ttl = 3600000, responseTime } = options;
     const key = this.getCacheKey(input, model);
 
-    this.evictIfNeeded();
-
     const cached: CachedResponse<T> = {
       response,
       timestamp: Date.now(),
@@ -174,6 +172,8 @@ export class ResponseCache<T> {
 
     this.cache.set(key, cached, ttl);
     this.stats.totalCached++;
+
+    this.evictIfNeeded();
 
     logger.debug('Cached response', {
       key,

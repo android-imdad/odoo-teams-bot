@@ -21,11 +21,13 @@ process.env = {
 // Increase timeout for async operations
 jest.setTimeout(30000);
 
-// Setup global mocks
-global.console = {
-  ...console,
-  error: jest.fn(),
-  warn: jest.fn(),
-  info: jest.fn(),
-  log: jest.fn(),
-};
+// Mock uuid module
+jest.mock('uuid', () => ({
+  v4: jest.fn(() => 'mocked-uuid-12345'),
+}));
+
+// Cleanup after all tests
+afterAll(() => {
+  // Ensure all handles are closed
+  jest.clearAllMocks();
+});

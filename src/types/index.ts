@@ -28,3 +28,6 @@ export interface CacheEntry<T> {
   timestamp: number;
   ttl: number;
 }
+
+// Re-export OAuth types
+export * from './oauth.types';

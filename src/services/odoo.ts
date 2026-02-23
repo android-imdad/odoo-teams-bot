@@ -6,18 +6,24 @@ import {
   OdooProject,
   OdooTask
 } from '../types/odoo.types';
-import { TimesheetEntry } from '../types';
+import { TimesheetEntry, AuthRequiredError, AuthContext } from '../types';
 import { Cache } from './cache';
+import { OAuthService } from './oauth';
+import { ApiKeyAuthService } from './apiKeyAuth';
 
-export class OdooService {
+class OdooService {
   private config: OdooConfig;
   private uid: number | null = null;
   private commonClient: xmlrpc.Client;
   private objectClient: xmlrpc.Client;
   private projectCache: Cache<OdooProject[]>;
+  private oauthService?: OAuthService;
+  private apiKeyAuthService?: ApiKeyAuthService;
 
-  constructor(odooConfig: OdooConfig) {
+  constructor(odooConfig: OdooConfig, oauthService?: OAuthService, apiKeyAuthService?: ApiKeyAuthService) {
     this.config = odooConfig;
+    this.oauthService = oauthService;
+    this.apiKeyAuthService = apiKeyAuthService;
 
     const url = new URL(odooConfig.url);
     const isSecure = url.protocol === 'https:';
@@ -46,7 +52,11 @@ export class OdooService {
     this.projectCache = new Cache<OdooProject[]>();
     this.projectCache.startCleanup();
 
-    logger.info('OdooService initialized', { url: odooConfig.url });
+    logger.info('OdooService initialized', {
+      url: odooConfig.url,
+      oauthEnabled: !!oauthService,
+      apiKeyAuthEnabled: !!apiKeyAuthService
+    });
   }
 
   /**
@@ -234,13 +244,224 @@ export class OdooService {
   }
 
   /**
-   * Create timesheet entry in Odoo
+   * Get authentication context for a specific user
+   * Priority: API Key > OAuth > Service Account
    */
-  async logTime(entry: TimesheetEntry): Promise<number> {
-    try {
-      logger.info('Creating timesheet entry in Odoo', { entry });
+  private async getAuthForUser(teamsUserId: string): Promise<AuthContext> {
+    // If API Key auth is enabled, try to get user's API key
+    if (this.apiKeyAuthService) {
+      const session = await this.apiKeyAuthService.getSession(teamsUserId);
 
-      const uid = await this.authenticate();
+      if (!session || !session.apiKey) {
+        throw new AuthRequiredError('User not authenticated with Odoo. Please connect your account using "connect".');
+      }
+
+      return { type: 'api_key', apiKey: session.apiKey, uid: session.odooUserId };
+    }
+
+    // If OAuth is enabled, try to get user's access token
+    if (this.oauthService) {
+      const accessToken = await this.oauthService.getAccessToken(teamsUserId);
+
+      if (!accessToken) {
+        throw new AuthRequiredError('User not authenticated with Odoo. Please connect your account using "connect to odoo".');
+      }
+
+      return { type: 'oauth', accessToken };
+    }
+
+    // Legacy mode: use service account
+    const uid = await this.authenticate();
+    return { type: 'basic', uid };
+  }
+
+  /**
+   * Execute Odoo method with per-user authentication
+   */
+  private async executeKwWithUserAuth(
+    model: string,
+    method: string,
+    params: any[],
+    auth: AuthContext
+  ): Promise<any> {
+    // For OAuth, we need to use JSON-RPC with Bearer token
+    if (auth.type === 'oauth') {
+      return this.executeKwWithOAuth(model, method, params, auth.accessToken!);
+    }
+
+    // For API Key auth, use XML-RPC with API key as password
+    if (auth.type === 'api_key') {
+      return this.executeKwWithApiKey(model, method, params, auth.uid!, auth.apiKey!);
+    }
+
+    // For basic auth, use XML-RPC
+    return new Promise((resolve, reject) => {
+      this.objectClient.methodCall(
+        'execute_kw',
+        [
+          this.config.db,
+          auth.uid,
+          this.config.password,
+          model,
+          method,
+          params
+        ],
+        (error: any, result) => {
+          if (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            logger.error('Odoo execute_kw failed', {
+              model,
+              method,
+              error: errorMsg
+            });
+            reject(new Error(`Odoo ${model}.${method} failed: ${errorMsg}`));
+            return;
+          }
+
+          resolve(result);
+        }
+      );
+    });
+  }
+
+  /**
+   * Execute Odoo method using API Key authentication via XML-RPC
+   * API Keys work by using the key as the password with the user ID
+   */
+  private async executeKwWithApiKey(
+    model: string,
+    method: string,
+    params: any[],
+    uid: number,
+    apiKey: string
+  ): Promise<any> {
+    return new Promise((resolve, reject) => {
+      this.objectClient.methodCall(
+        'execute_kw',
+        [
+          this.config.db,
+          uid,
+          apiKey, // Use API key as password
+          model,
+          method,
+          params
+        ],
+        (error: any, result) => {
+          if (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+
+            // Check for authentication errors
+            if (errorMsg.includes('Access denied') || errorMsg.includes('authentication')) {
+              reject(new AuthRequiredError('API Key invalid or expired. Please reconnect your account.'));
+              return;
+            }
+
+            logger.error('Odoo execute_kw with API Key failed', {
+              model,
+              method,
+              error: errorMsg
+            });
+            reject(new Error(`Odoo ${model}.${method} failed: ${errorMsg}`));
+            return;
+          }
+
+          resolve(result);
+        }
+      );
+    });
+  }
+
+  /**
+   * Execute Odoo method using OAuth Bearer token via JSON-RPC
+   */
+  private async executeKwWithOAuth(
+    model: string,
+    method: string,
+    params: any[],
+    accessToken: string
+  ): Promise<any> {
+    const url = new URL(this.config.url);
+    const jsonRpcUrl = `${url.protocol}//${url.hostname}${url.port ? ':' + url.port : ''}/jsonrpc`;
+
+    const body = {
+      jsonrpc: '2.0',
+      method: 'call',
+      params: {
+        service: 'object',
+        method: 'execute_kw',
+        args: [
+          this.config.db,
+          'oauth', // Special marker for OAuth
+          accessToken, // Pass token as "password"
+          model,
+          method,
+          params
+        ]
+      },
+      id: Math.floor(Math.random() * 1000000000)
+    };
+
+    const response = await fetch(jsonRpcUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+
+      // Check for authentication errors
+      if (response.status === 401 || errorText.includes('session_invalid')) {
+        throw new AuthRequiredError('Odoo session expired. Please reconnect your account.');
+      }
+
+      throw new Error(`Odoo ${model}.${method} failed: ${response.status} - ${errorText}`);
+    }
+
+    const data: any = await response.json();
+
+    if (data.error) {
+      // Check if it's an authentication error
+      if (data.error.data?.name === 'odoo.exceptions.AccessDenied' ||
+          data.error.message?.includes('Access denied')) {
+        throw new AuthRequiredError('Odoo access denied. Please reconnect your account.');
+      }
+
+      throw new Error(`Odoo ${model}.${method} failed: ${data.error.message || JSON.stringify(data.error)}`);
+    }
+
+    return data.result;
+  }
+
+  /**
+   * Create timesheet entry in Odoo with per-user authentication
+   */
+  async logTime(entry: TimesheetEntry, teamsUserId?: string): Promise<number> {
+    try {
+      logger.info('Creating timesheet entry in Odoo', { entry, teamsUserId });
+
+      // Get authentication for the user (or service account if no user ID provided)
+      let auth: AuthContext;
+      let userId: number;
+
+      if (teamsUserId) {
+        auth = await this.getAuthForUser(teamsUserId);
+
+        // For OAuth, we need to get the user's Odoo ID
+        if (auth.type === 'oauth') {
+          const session = await this.oauthService!.getUserSession(teamsUserId);
+          userId = session?.odooUserId || 0;
+        } else {
+          userId = auth.uid!;
+        }
+      } else {
+        // Fallback to service account
+        userId = await this.authenticate();
+        auth = { type: 'basic', uid: userId };
+      }
 
       // Prepare timesheet data for Odoo 13-15
       // account.analytic.line is used for timesheets
@@ -249,7 +470,7 @@ export class OdooService {
         name: entry.description,
         unit_amount: entry.hours,
         date: entry.date,
-        user_id: entry.user_id || uid
+        user_id: userId
       };
 
       // Include task_id if provided
@@ -257,24 +478,27 @@ export class OdooService {
         timesheetParams.task_id = entry.task_id;
       }
 
-      // Create the timesheet entry
-      const timesheetId = await this.executeKw(
+      // Create the timesheet entry with user-specific authentication
+      const timesheetId = await this.executeKwWithUserAuth(
         'account.analytic.line',
         'create',
-        [timesheetParams]
+        [timesheetParams],
+        auth
       );
 
       logger.info('Timesheet entry created successfully', {
         timesheetId,
         project_id: entry.project_id,
         task_id: entry.task_id,
-        hours: entry.hours
+        hours: entry.hours,
+        userId,
+        authType: auth.type
       });
 
       return timesheetId;
 
     } catch (error) {
-      logger.error('Failed to create timesheet entry', { entry, error });
+      logger.error('Failed to create timesheet entry', { entry, teamsUserId, error });
       throw error;
     }
   }
@@ -328,5 +552,4 @@ export class OdooService {
   }
 }
 
-// Export singleton instance
-export const odooService = new OdooService(config.odoo);
+export { OdooService };

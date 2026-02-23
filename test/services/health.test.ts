@@ -2,15 +2,25 @@
  * Tests for health service
  */
 
-import { HealthService, healthService } from '../../src/services/health';
-import { odooService } from '../../src/services/odoo';
+import { HealthService } from '../../src/services/health';
+import { OdooService } from '../../src/services/odoo';
 import { parserService } from '../../src/services/parser';
 import { aiResponseCache } from '../../src/services/responseCache';
 import { logger } from '../../src/config/logger';
 
-jest.mock('../../src/services/odoo');
 jest.mock('../../src/services/parser');
-jest.mock('../../src/services/responseCache');
+jest.mock('../../src/services/responseCache', () => ({
+  aiResponseCache: {
+    getStats: jest.fn().mockReturnValue({
+      size: 0,
+      hits: 0,
+      misses: 0,
+      hitRate: 0,
+      totalCached: 0,
+      totalEvicted: 0
+    })
+  }
+}));
 jest.mock('../../src/config/logger');
 
 // Mock os module
@@ -21,11 +31,19 @@ jest.mock('os', () => ({
 
 describe('HealthService', () => {
   let service: HealthService;
+  let mockOdooService: jest.Mocked<OdooService>;
 
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers();
-    service = new HealthService();
+    mockOdooService = {
+      getProjects: jest.fn().mockResolvedValue([]),
+      getTasks: jest.fn().mockResolvedValue([]),
+      logTime: jest.fn().mockResolvedValue(123),
+      createTask: jest.fn().mockResolvedValue(456),
+      clearCache: jest.fn()
+    } as unknown as jest.Mocked<OdooService>;
+    service = new HealthService(mockOdooService);
   });
 
   afterEach(() => {
@@ -38,9 +56,7 @@ describe('HealthService', () => {
     });
 
     it('should set start time to current timestamp', () => {
-      const before = Date.now();
-      const newService = new HealthService();
-      const after = Date.now();
+      const newService = new HealthService(mockOdooService);
 
       // Verify service was created
       expect(newService).toBeDefined();
@@ -50,7 +66,7 @@ describe('HealthService', () => {
       const originalVersion = process.env.npm_package_version;
       process.env.npm_package_version = '2.0.0';
 
-      const newService = new HealthService();
+      const newService = new HealthService(mockOdooService);
       expect(newService).toBeDefined();
 
       process.env.npm_package_version = originalVersion;
@@ -60,7 +76,7 @@ describe('HealthService', () => {
       const originalVersion = process.env.npm_package_version;
       delete process.env.npm_package_version;
 
-      const newService = new HealthService();
+      const newService = new HealthService(mockOdooService);
       expect(newService).toBeDefined();
 
       if (originalVersion) {
@@ -71,9 +87,14 @@ describe('HealthService', () => {
 
   describe('getHealth', () => {
     it('should return healthy status when all checks pass', async () => {
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
+      // Create fresh service to avoid state from periodic checks
+      const freshMockOdoo = {
+        ...mockOdooService,
+        getProjects: jest.fn().mockResolvedValue([{ id: 1, name: 'Test' }])
+      } as unknown as jest.Mocked<OdooService>;
+      const freshService = new HealthService(freshMockOdoo);
 
-      const health = await service.getHealth();
+      const health = await freshService.getHealth();
 
       expect(health.status).toBe('healthy');
       expect(health.checks).toBeDefined();
@@ -85,7 +106,7 @@ describe('HealthService', () => {
     });
 
     it('should include memory check', async () => {
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
 
       const health = await service.getHealth();
       const memoryCheck = health.checks.find(c => c.name === 'memory');
@@ -98,9 +119,6 @@ describe('HealthService', () => {
     });
 
     it('should warn when memory usage is high', async () => {
-      // Mock high memory usage by overriding the method
-      const originalHealth = await service.getHealth();
-
       // Manually test the check logic
       const memory = { used: 900, total: 1000, percentage: 92, heapUsed: 900, heapTotal: 1000 };
       const status = memory.percentage < 90 ? 'pass' : memory.percentage < 95 ? 'warn' : 'fail';
@@ -116,7 +134,7 @@ describe('HealthService', () => {
     });
 
     it('should include CPU check', async () => {
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
 
       const health = await service.getHealth();
       const cpuCheck = health.checks.find(c => c.name === 'cpu');
@@ -128,7 +146,7 @@ describe('HealthService', () => {
     });
 
     it('should include Odoo check', async () => {
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
 
       const health = await service.getHealth();
       const odooCheck = health.checks.find(c => c.name === 'odoo');
@@ -140,7 +158,7 @@ describe('HealthService', () => {
     });
 
     it('should return degraded status when Odoo is down', async () => {
-      (odooService.getProjects as jest.Mock).mockRejectedValue(new Error('Connection failed'));
+      (mockOdooService.getProjects as jest.Mock).mockRejectedValue(new Error('Connection failed'));
 
       const health = await service.getHealth();
       const odooCheck = health.checks.find(c => c.name === 'odoo');
@@ -150,7 +168,7 @@ describe('HealthService', () => {
     });
 
     it('should include API metrics', async () => {
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
 
       const health = await service.getHealth();
 
@@ -167,7 +185,7 @@ describe('HealthService', () => {
         misses: 20,
         hitRate: 0.71
       });
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
 
       const health = await service.getHealth();
 
@@ -179,7 +197,7 @@ describe('HealthService', () => {
 
     it('should return unhealthy when critical checks fail', async () => {
       // Force critical failure by making multiple checks fail
-      const mockGetProjects = odooService.getProjects as jest.Mock;
+      const mockGetProjects = mockOdooService.getProjects as jest.Mock;
       mockGetProjects.mockRejectedValue(new Error('Critical failure'));
 
       const health = await service.getHealth();
@@ -191,7 +209,7 @@ describe('HealthService', () => {
 
   describe('getSimpleHealth', () => {
     it('should return ok status when Odoo is up', async () => {
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
 
       // First call getHealth to set odooStatus
       await service.getHealth();
@@ -202,7 +220,7 @@ describe('HealthService', () => {
     });
 
     it('should return degraded status when Odoo is down', async () => {
-      (odooService.getProjects as jest.Mock).mockRejectedValue(new Error('Connection failed'));
+      (mockOdooService.getProjects as jest.Mock).mockRejectedValue(new Error('Connection failed'));
 
       // First call getHealth to set odooStatus
       await service.getHealth();
@@ -214,7 +232,7 @@ describe('HealthService', () => {
 
   describe('isReady', () => {
     it('should return true when Odoo is up', async () => {
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
 
       await service.getHealth();
 
@@ -222,7 +240,7 @@ describe('HealthService', () => {
     });
 
     it('should return false when Odoo is down', async () => {
-      (odooService.getProjects as jest.Mock).mockRejectedValue(new Error('Connection failed'));
+      (mockOdooService.getProjects as jest.Mock).mockRejectedValue(new Error('Connection failed'));
 
       await service.getHealth();
 
@@ -238,7 +256,7 @@ describe('HealthService', () => {
 
   describe('getMetrics', () => {
     it('should return system metrics', async () => {
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
       (aiResponseCache.getStats as jest.Mock).mockReturnValue({
         size: 5,
         hits: 100,
@@ -257,7 +275,7 @@ describe('HealthService', () => {
     });
 
     it('should include memory metrics', async () => {
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
 
       const metrics = await service.getMetrics();
 
@@ -267,7 +285,7 @@ describe('HealthService', () => {
     });
 
     it('should include CPU metrics', async () => {
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
 
       const metrics = await service.getMetrics();
 
@@ -332,7 +350,7 @@ describe('HealthService', () => {
     });
 
     it('should check Odoo status periodically', async () => {
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
 
       jest.advanceTimersByTime(35000);
 
@@ -341,7 +359,7 @@ describe('HealthService', () => {
     });
 
     it('should log warning when Odoo check fails', async () => {
-      (odooService.getProjects as jest.Mock).mockRejectedValue(new Error('Connection failed'));
+      (mockOdooService.getProjects as jest.Mock).mockRejectedValue(new Error('Connection failed'));
 
       await service.getHealth();
 
@@ -362,7 +380,7 @@ describe('HealthService', () => {
 
   describe('checkOdoo', () => {
     it('should return up status when Odoo responds', async () => {
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1, name: 'Test' }]);
 
       const health = await service.getHealth();
       const odooCheck = health.checks.find(c => c.name === 'odoo');
@@ -371,7 +389,7 @@ describe('HealthService', () => {
     });
 
     it('should return down status when Odoo fails', async () => {
-      (odooService.getProjects as jest.Mock).mockRejectedValue(new Error('Connection failed'));
+      (mockOdooService.getProjects as jest.Mock).mockRejectedValue(new Error('Connection failed'));
 
       const health = await service.getHealth();
       const odooCheck = health.checks.find(c => c.name === 'odoo');
@@ -397,14 +415,22 @@ describe('HealthService', () => {
   });
 });
 
-describe('healthService singleton', () => {
-  it('should be an instance of HealthService', () => {
-    expect(healthService).toBeDefined();
-    expect(typeof healthService.getHealth).toBe('function');
-    expect(typeof healthService.getSimpleHealth).toBe('function');
-    expect(typeof healthService.isReady).toBe('function');
-    expect(typeof healthService.isLive).toBe('function');
-    expect(typeof healthService.getMetrics).toBe('function');
-    expect(typeof healthService.getPrometheusMetrics).toBe('function');
+describe('HealthService exports', () => {
+  it('should export HealthService class', () => {
+    const mockOdoo = {
+      getProjects: jest.fn().mockResolvedValue([]),
+      getTasks: jest.fn().mockResolvedValue([]),
+      logTime: jest.fn().mockResolvedValue(123),
+      createTask: jest.fn().mockResolvedValue(456),
+      clearCache: jest.fn()
+    } as unknown as jest.Mocked<OdooService>;
+    const testService = new HealthService(mockOdoo);
+    expect(testService).toBeDefined();
+    expect(typeof testService.getHealth).toBe('function');
+    expect(typeof testService.getSimpleHealth).toBe('function');
+    expect(typeof testService.isReady).toBe('function');
+    expect(typeof testService.isLive).toBe('function');
+    expect(typeof testService.getMetrics).toBe('function');
+    expect(typeof testService.getPrometheusMetrics).toBe('function');
   });
 });

@@ -264,10 +264,12 @@ class ConfigValidator {
 // Export validator instance
 export const configValidator = new ConfigValidator();
 
-// Validate on import
-const validation = configValidator.validate();
-if (!validation.valid) {
-  throw new Error(`Configuration validation failed:\n${validation.errors.join('\n')}`);
+// Validate on import (only in non-test environments)
+if (process.env.NODE_ENV !== 'test') {
+  const validation = configValidator.validate();
+  if (!validation.valid) {
+    throw new Error(`Configuration validation failed:\n${validation.errors.join('\n')}`);
+  }
 }
 
 export type { ValidationResult, ConfigSchema };

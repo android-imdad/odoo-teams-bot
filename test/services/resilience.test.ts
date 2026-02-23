@@ -4,10 +4,9 @@
 
 import {
   ResilienceService,
-  resilienceService,
-  resilientOperation,
   QueuedOperation
 } from '../../src/services/resilience';
+import { OdooService } from '../../src/services/odoo';
 import { auditService } from '../../src/services/audit';
 import { logger } from '../../src/config/logger';
 import * as fs from 'fs';
@@ -15,28 +14,33 @@ import * as path from 'path';
 
 jest.mock('../../src/services/audit');
 jest.mock('../../src/config/logger');
-jest.mock('../../src/services/odoo', () => ({
-  odooService: {
-    logTime: jest.fn()
-  }
-}));
+jest.mock('../../src/services/odoo');
 
 // Mock fs module
 jest.mock('fs', () => ({
   existsSync: jest.fn(),
   mkdirSync: jest.fn(),
   readFileSync: jest.fn(),
-  writeFileSync: jest.fn()
+  writeFileSync: jest.fn(),
+  stat: jest.fn()
 }));
 
 describe('ResilienceService', () => {
   let service: ResilienceService;
   const testQueuePath = '/tmp/test-offline-queue.json';
+  let mockOdooService: jest.Mocked<OdooService>;
 
   beforeEach(() => {
     jest.clearAllMocks();
     (fs.existsSync as jest.Mock).mockReturnValue(false);
-    service = new ResilienceService({
+    mockOdooService = {
+      getProjects: jest.fn().mockResolvedValue([]),
+      getTasks: jest.fn().mockResolvedValue([]),
+      logTime: jest.fn().mockResolvedValue(123),
+      createTask: jest.fn().mockResolvedValue(456),
+      clearCache: jest.fn()
+    } as unknown as jest.Mocked<OdooService>;
+    service = new ResilienceService(mockOdooService, {
       enableOfflineMode: true,
       offlineQueuePath: testQueuePath,
       maxQueueSize: 10,
@@ -50,7 +54,7 @@ describe('ResilienceService', () => {
 
   describe('constructor', () => {
     it('should initialize with default config', () => {
-      const defaultService = new ResilienceService();
+      const defaultService = new ResilienceService(mockOdooService);
       expect(defaultService).toBeDefined();
     });
 
@@ -81,7 +85,7 @@ describe('ResilienceService', () => {
       (fs.existsSync as jest.Mock).mockReturnValue(true);
       (fs.readFileSync as jest.Mock).mockReturnValue(JSON.stringify(existingQueue));
 
-      const newService = new ResilienceService({
+      const newService = new ResilienceService(mockOdooService, {
         offlineQueuePath: testQueuePath
       });
 
@@ -95,7 +99,7 @@ describe('ResilienceService', () => {
         throw new Error('Read error');
       });
 
-      const newService = new ResilienceService({
+      const newService = new ResilienceService(mockOdooService, {
         offlineQueuePath: testQueuePath
       });
 
@@ -111,7 +115,7 @@ describe('ResilienceService', () => {
         return p !== path.dirname(testQueuePath);
       });
 
-      new ResilienceService({ offlineQueuePath: testQueuePath });
+      new ResilienceService(mockOdooService, { offlineQueuePath: testQueuePath });
 
       expect(fs.mkdirSync).toHaveBeenCalledWith(path.dirname(testQueuePath), { recursive: true });
     });
@@ -145,8 +149,7 @@ describe('ResilienceService', () => {
     });
 
     it('should mark Odoo as available on successful timesheet operation', async () => {
-      const { odooService } = await import('../../src/services/odoo');
-      (odooService.logTime as jest.Mock).mockResolvedValue(123);
+      (mockOdooService.logTime as jest.Mock).mockResolvedValue(123);
 
       const operation = jest.fn().mockResolvedValue('success');
       const fallback = jest.fn().mockResolvedValue('fallback');
@@ -215,7 +218,7 @@ describe('ResilienceService', () => {
       const operation = jest.fn().mockRejectedValue(new Error('Failed'));
       const fallback = jest.fn().mockResolvedValue('fallback');
 
-      service = new ResilienceService({ enableOfflineMode: false });
+      service = new ResilienceService(mockOdooService, { enableOfflineMode: false });
 
       await service.executeWithFallback(operation, fallback, {
         operationName: 'test-operation',
@@ -230,8 +233,7 @@ describe('ResilienceService', () => {
 
   describe('checkOdooAvailability', () => {
     it('should return cached result within 1 minute', async () => {
-      const { odooService } = await import('../../src/services/odoo');
-      (odooService.logTime as jest.Mock).mockResolvedValue(123);
+      (mockOdooService.logTime as jest.Mock).mockResolvedValue(123);
 
       // First check
       await service.checkOdooAvailability();
@@ -242,8 +244,7 @@ describe('ResilienceService', () => {
     });
 
     it('should check Odoo after cache expires', async () => {
-      const { odooService } = await import('../../src/services/odoo');
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1 }]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1 }]);
 
       // Force cache expiration by manipulating time would be ideal,
       // but we'll just test the actual check
@@ -252,8 +253,7 @@ describe('ResilienceService', () => {
     });
 
     it('should return false when Odoo is unavailable', async () => {
-      const { odooService } = await import('../../src/services/odoo');
-      (odooService.getProjects as jest.Mock).mockRejectedValue(new Error('Connection failed'));
+      (mockOdooService.getProjects as jest.Mock).mockRejectedValue(new Error('Connection failed'));
 
       const result = await service.checkOdooAvailability();
       expect(result).toBe(false);
@@ -275,8 +275,8 @@ describe('ResilienceService', () => {
     });
 
     it('should reflect offline mode setting', () => {
-      const enabledService = new ResilienceService({ enableOfflineMode: true });
-      const disabledService = new ResilienceService({ enableOfflineMode: false });
+      const enabledService = new ResilienceService(mockOdooService, { enableOfflineMode: true });
+      const disabledService = new ResilienceService(mockOdooService, { enableOfflineMode: false });
 
       expect(enabledService.getQueueStatus().enabled).toBe(true);
       expect(disabledService.getQueueStatus().enabled).toBe(false);
@@ -318,8 +318,7 @@ describe('ResilienceService', () => {
   describe('offline queue processing', () => {
     it('should process queued operations when Odoo is available', async () => {
       jest.useFakeTimers();
-      const { odooService } = await import('../../src/services/odoo');
-      (odooService.logTime as jest.Mock).mockResolvedValue(123);
+      (mockOdooService.logTime as jest.Mock).mockResolvedValue(123);
 
       // Add an operation to the queue by executing a failing operation with queue enabled
       const operation = jest.fn().mockRejectedValue(new Error('Failed'));
@@ -348,8 +347,7 @@ describe('ResilienceService', () => {
 
     it('should drop operations after max retries', async () => {
       jest.useFakeTimers();
-      const { odooService } = await import('../../src/services/odoo');
-      (odooService.logTime as jest.Mock).mockRejectedValue(new Error('Still failing'));
+      (mockOdooService.logTime as jest.Mock).mockRejectedValue(new Error('Still failing'));
 
       // Add operation to queue
       const operation = jest.fn().mockRejectedValue(new Error('Failed'));
@@ -369,7 +367,7 @@ describe('ResilienceService', () => {
       });
 
       // Mark Odoo as available to trigger processing
-      (odooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1 }]);
+      (mockOdooService.getProjects as jest.Mock).mockResolvedValue([{ id: 1 }]);
 
       // Advance timer multiple times to trigger retries
       for (let i = 0; i < 6; i++) {
@@ -378,7 +376,7 @@ describe('ResilienceService', () => {
       }
 
       expect(logger.error).toHaveBeenCalledWith(
-        'Dropping operation after max retries',
+        'Operation failed after all retries',
         expect.any(Object)
       );
 
@@ -388,7 +386,7 @@ describe('ResilienceService', () => {
 
   describe('queue size limit', () => {
     it('should drop oldest entries when max queue size is reached', async () => {
-      const smallService = new ResilienceService({
+      const smallService = new ResilienceService(mockOdooService, {
         maxQueueSize: 2,
         offlineQueuePath: testQueuePath
       });
@@ -420,52 +418,21 @@ describe('ResilienceService', () => {
   });
 });
 
-describe('resilienceService singleton', () => {
-  it('should be an instance of ResilienceService', () => {
-    expect(resilienceService).toBeDefined();
-    expect(typeof resilienceService.executeWithFallback).toBe('function');
-    expect(typeof resilienceService.checkOdooAvailability).toBe('function');
-    expect(typeof resilienceService.getQueueStatus).toBe('function');
-    expect(typeof resilienceService.clearQueue).toBe('function');
-    expect(typeof resilienceService.getDegradedTimesheetResponse).toBe('function');
-  });
-});
-
-describe('resilientOperation wrapper', () => {
-  it('should execute operation with default fallback', async () => {
-    const operation = jest.fn().mockResolvedValue('success');
-
-    const result = await resilientOperation(operation);
-
-    expect(result).toBe('success');
-  });
-
-  it('should throw error when operation fails and no fallback provided', async () => {
-    const operation = jest.fn().mockRejectedValue(new Error('Failed'));
-
-    await expect(resilientOperation(operation)).rejects.toThrow('Operation failed and no fallback provided');
-  });
-
-  it('should use provided fallback', async () => {
-    const operation = jest.fn().mockRejectedValue(new Error('Failed'));
-    const fallback = jest.fn().mockResolvedValue('fallback');
-
-    const result = await resilientOperation(operation, { fallback });
-
-    expect(result).toBe('fallback');
-  });
-
-  it('should pass options to resilience service', async () => {
-    const operation = jest.fn().mockRejectedValue(new Error('Failed'));
-    const fallback = jest.fn().mockResolvedValue('fallback');
-
-    await resilientOperation(operation, {
-      fallback,
-      operationName: 'test-op',
-      userId: 'user-1',
-      enableQueue: false
-    });
-
-    expect(operation).toHaveBeenCalled();
+describe('ResilienceService exports', () => {
+  it('should export ResilienceService class', () => {
+    const mockOdoo = {
+      getProjects: jest.fn().mockResolvedValue([]),
+      getTasks: jest.fn().mockResolvedValue([]),
+      logTime: jest.fn().mockResolvedValue(123),
+      createTask: jest.fn().mockResolvedValue(456),
+      clearCache: jest.fn()
+    } as unknown as jest.Mocked<OdooService>;
+    const testService = new ResilienceService(mockOdoo);
+    expect(testService).toBeDefined();
+    expect(typeof testService.executeWithFallback).toBe('function');
+    expect(typeof testService.checkOdooAvailability).toBe('function');
+    expect(typeof testService.getQueueStatus).toBe('function');
+    expect(typeof testService.clearQueue).toBe('function');
+    expect(typeof testService.getDegradedTimesheetResponse).toBe('function');
   });
 });

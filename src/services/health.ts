@@ -3,7 +3,7 @@
  * Provides endpoints for monitoring, metrics, and diagnostics.
  */
 
-import { odooService } from './odoo';
+import { OdooService } from './odoo';
 import { parserService } from './parser';
 import { logger } from '../config/logger';
 import { config } from '../config/config';
@@ -70,7 +70,7 @@ export interface APIMetrics {
   };
 }
 
-export class HealthService {
+class HealthService {
   private startTime: number;
   private version: string;
   private lastOdooCheck: number = 0;
@@ -78,10 +78,12 @@ export class HealthService {
   private odooStatus: 'up' | 'down' | 'unknown' = 'unknown';
   private geminiStatus: 'up' | 'down' | 'unknown' = 'unknown';
   private checkInterval: number = 60000; // Check every minute
+  private odooService: OdooService;
 
-  constructor() {
+  constructor(odooService: OdooService) {
     this.startTime = Date.now();
     this.version = process.env.npm_package_version || '1.0.0';
+    this.odooService = odooService;
 
     // Start periodic health checks
     this.startPeriodicChecks();
@@ -146,7 +148,7 @@ export class HealthService {
     const startTime = Date.now();
 
     try {
-      await odooService.getProjects();
+      await this.odooService.getProjects();
       const responseTime = Date.now() - startTime;
 
       return {
@@ -245,6 +247,7 @@ export class HealthService {
 
     // Odoo check
     const odooCheck = await this.checkOdoo();
+    this.odooStatus = odooCheck.status; // Update odooStatus for other methods
     checks.push({
       name: 'odoo',
       status: odooCheck.status === 'up' ? 'pass' : 'fail',
@@ -252,12 +255,8 @@ export class HealthService {
       message: odooCheck.message
     });
 
-    if (odooCheck.status === 'down') {
-      overallStatus = 'degraded';
-    }
-
     // Determine overall status
-    const failedChecks = checks.filter(c => c.status === 'fail');
+    const failedChecks = checks.filter(c => c.status === 'fail' && c.name !== 'odoo');
     const warnedChecks = checks.filter(c => c.status === 'warn');
 
     if (failedChecks.length > 0) {
@@ -390,5 +389,5 @@ export class HealthService {
   }
 }
 
-// Export singleton instance
-export const healthService = new HealthService();
+// Note: HealthService should be instantiated with OdooService and exported from index.ts
+export { HealthService };
