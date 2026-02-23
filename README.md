@@ -687,7 +687,7 @@ For issues, questions, or contributions:
 
 ## License
 
-MIT
+Modified MIT
 
 ## Acknowledgments
 
