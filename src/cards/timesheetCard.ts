@@ -10,7 +10,7 @@ export class TimesheetCardGenerator {
     const card = {
       type: 'AdaptiveCard',
       $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
-      version: '1.3',
+      version: '1.2',
       body: [
         {
           type: 'TextBlock',
@@ -91,7 +91,7 @@ export class TimesheetCardGenerator {
     const card = {
       type: 'AdaptiveCard',
       $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
-      version: '1.3',
+      version: '1.2',
       body: [
         {
           type: 'TextBlock',
@@ -147,7 +147,7 @@ export class TimesheetCardGenerator {
     const card = {
       type: 'AdaptiveCard',
       $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
-      version: '1.3',
+      version: '1.2',
       body: [
         {
           type: 'TextBlock',
@@ -201,7 +201,7 @@ export class TimesheetCardGenerator {
     const card = {
       type: 'AdaptiveCard',
       $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
-      version: '1.4',
+      version: '1.2',
       body: [
         {
           type: 'TextBlock',
@@ -257,7 +257,7 @@ export class TimesheetCardGenerator {
     const card = {
       type: 'AdaptiveCard',
       $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
-      version: '1.4',
+      version: '1.2',
       body: [
         {
           type: 'TextBlock',
@@ -303,7 +303,7 @@ export class TimesheetCardGenerator {
     const card = {
       type: 'AdaptiveCard',
       $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
-      version: '1.4',
+      version: '1.2',
       body: [
         {
           type: 'TextBlock',

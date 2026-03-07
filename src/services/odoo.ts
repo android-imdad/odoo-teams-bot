@@ -10,6 +10,7 @@ import { TimesheetEntry, AuthRequiredError, AuthContext } from '../types';
 import { Cache } from './cache';
 import { OAuthService } from './oauth';
 import { ApiKeyAuthService } from './apiKeyAuth';
+import { UserMappingService, OdooUserInfo } from './userMapping';
 
 class OdooService {
   private config: OdooConfig;
@@ -19,11 +20,19 @@ class OdooService {
   private projectCache: Cache<OdooProject[]>;
   private oauthService?: OAuthService;
   private apiKeyAuthService?: ApiKeyAuthService;
+  private userMappingService?: UserMappingService;
+  private isAdminProxyMode: boolean;
 
-  constructor(odooConfig: OdooConfig, oauthService?: OAuthService, apiKeyAuthService?: ApiKeyAuthService) {
+  constructor(
+    odooConfig: OdooConfig,
+    oauthService?: OAuthService,
+    apiKeyAuthService?: ApiKeyAuthService,
+    isAdminProxyMode: boolean = false
+  ) {
     this.config = odooConfig;
     this.oauthService = oauthService;
     this.apiKeyAuthService = apiKeyAuthService;
+    this.isAdminProxyMode = isAdminProxyMode;
 
     const url = new URL(odooConfig.url);
     const isSecure = url.protocol === 'https:';
@@ -52,10 +61,19 @@ class OdooService {
     this.projectCache = new Cache<OdooProject[]>();
     this.projectCache.startCleanup();
 
+    // Initialize user mapping service for admin proxy mode
+    if (isAdminProxyMode) {
+      this.userMappingService = new UserMappingService(
+        (model, method, params) => this.executeKw(model, method, params),
+        config.cache.projectTtl
+      );
+    }
+
     logger.info('OdooService initialized', {
       url: odooConfig.url,
       oauthEnabled: !!oauthService,
-      apiKeyAuthEnabled: !!apiKeyAuthService
+      apiKeyAuthEnabled: !!apiKeyAuthService,
+      adminProxyMode: isAdminProxyMode
     });
   }
 
@@ -438,10 +456,22 @@ class OdooService {
 
   /**
    * Create timesheet entry in Odoo with per-user authentication
+   *
+   * For admin_proxy mode: pass teamsUserEmail to look up and log as that user
+   * For other modes: pass teamsUserId to use stored credentials
    */
-  async logTime(entry: TimesheetEntry, teamsUserId?: string): Promise<number> {
+  async logTime(
+    entry: TimesheetEntry,
+    teamsUserId?: string,
+    teamsUserEmail?: string
+  ): Promise<number> {
     try {
-      logger.info('Creating timesheet entry in Odoo', { entry, teamsUserId });
+      logger.info('Creating timesheet entry in Odoo', { entry, teamsUserId, teamsUserEmail });
+
+      // Admin proxy mode: use admin account but log as the user found by email
+      if (this.isAdminProxyMode && teamsUserEmail) {
+        return this.logTimeAsAdminProxy(entry, teamsUserEmail);
+      }
 
       // Get authentication for the user (or service account if no user ID provided)
       let auth: AuthContext;
@@ -463,44 +493,90 @@ class OdooService {
         auth = { type: 'basic', uid: userId };
       }
 
-      // Prepare timesheet data for Odoo 13-15
-      // account.analytic.line is used for timesheets
-      const timesheetParams: any = {
-        project_id: entry.project_id,
-        name: entry.description,
-        unit_amount: entry.hours,
-        date: entry.date,
-        user_id: userId
-      };
-
-      // Include task_id if provided
-      if (entry.task_id) {
-        timesheetParams.task_id = entry.task_id;
-      }
-
-      // Create the timesheet entry with user-specific authentication
-      const timesheetId = await this.executeKwWithUserAuth(
-        'account.analytic.line',
-        'create',
-        [timesheetParams],
-        auth
-      );
-
-      logger.info('Timesheet entry created successfully', {
-        timesheetId,
-        project_id: entry.project_id,
-        task_id: entry.task_id,
-        hours: entry.hours,
-        userId,
-        authType: auth.type
-      });
-
-      return timesheetId;
+      return this.createTimesheetEntry(entry, userId, auth);
 
     } catch (error) {
-      logger.error('Failed to create timesheet entry', { entry, teamsUserId, error });
+      logger.error('Failed to create timesheet entry', { entry, teamsUserId, teamsUserEmail, error });
       throw error;
     }
+  }
+
+  /**
+   * Log timesheet using admin proxy mode
+   * Looks up user by email and logs timesheet on their behalf
+   */
+  private async logTimeAsAdminProxy(entry: TimesheetEntry, userEmail: string): Promise<number> {
+    logger.info('Logging timesheet via admin proxy', { userEmail, entry });
+
+    // Look up the Odoo user by email
+    const odooUser = await this.lookupUserByEmail(userEmail);
+
+    if (!odooUser) {
+      throw new Error(
+        `No Odoo user found with email: ${userEmail}. ` +
+        `Please ensure your Teams email matches your Odoo login email, ` +
+        `or contact your administrator to set up your account.`
+      );
+    }
+
+    // Admin authenticates with their own credentials
+    const adminUid = await this.authenticate();
+    const auth: AuthContext = { type: 'basic', uid: adminUid };
+
+    // Use the found user's ID for the timesheet
+    const userId = odooUser.id;
+
+    logger.info('Admin proxy: logging timesheet for user', {
+      adminUid,
+      targetUserId: userId,
+      targetUserEmail: userEmail,
+      targetUserName: odooUser.name
+    });
+
+    return this.createTimesheetEntry(entry, userId, auth);
+  }
+
+  /**
+   * Create the actual timesheet entry in Odoo
+   */
+  private async createTimesheetEntry(
+    entry: TimesheetEntry,
+    userId: number,
+    auth: AuthContext
+  ): Promise<number> {
+    // Prepare timesheet data for Odoo 13-15
+    // account.analytic.line is used for timesheets
+    const timesheetParams: any = {
+      project_id: entry.project_id,
+      name: entry.description,
+      unit_amount: entry.hours,
+      date: entry.date,
+      user_id: userId
+    };
+
+    // Include task_id if provided
+    if (entry.task_id) {
+      timesheetParams.task_id = entry.task_id;
+    }
+
+    // Create the timesheet entry with appropriate authentication
+    const timesheetId = await this.executeKwWithUserAuth(
+      'account.analytic.line',
+      'create',
+      [timesheetParams],
+      auth
+    );
+
+    logger.info('Timesheet entry created successfully', {
+      timesheetId,
+      project_id: entry.project_id,
+      task_id: entry.task_id,
+      hours: entry.hours,
+      userId,
+      authType: auth.type
+    });
+
+    return timesheetId;
   }
 
   /**
@@ -548,7 +624,29 @@ class OdooService {
    */
   clearCache(): void {
     this.projectCache.clear();
+    if (this.userMappingService) {
+      this.userMappingService.clearAllCaches();
+    }
     logger.info('Project cache cleared');
+  }
+
+  /**
+   * Look up an Odoo user by their email address
+   * Only available in admin proxy mode
+   */
+  async lookupUserByEmail(email: string): Promise<OdooUserInfo | null> {
+    if (!this.isAdminProxyMode || !this.userMappingService) {
+      throw new Error('User lookup is only available in admin proxy mode');
+    }
+
+    return this.userMappingService.lookupUserByEmail(email);
+  }
+
+  /**
+   * Check if admin proxy mode is enabled
+   */
+  isAdminProxy(): boolean {
+    return this.isAdminProxyMode;
   }
 }
 

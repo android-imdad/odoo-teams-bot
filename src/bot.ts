@@ -1,6 +1,7 @@
 import {
   TeamsActivityHandler,
-  TurnContext
+  TurnContext,
+  TeamsInfo
 } from 'botbuilder';
 import { logger } from './config/logger';
 import { config } from './config/config';
@@ -19,18 +20,21 @@ export class TimesheetBot extends TeamsActivityHandler {
   private apiKeyAuthService?: ApiKeyAuthService;
   private odooService: OdooService;
   private useApiKeyAuth: boolean;
+  private isAdminProxyMode: boolean;
 
   constructor(
     oauthService: OAuthService | undefined,
     apiKeyAuthService: ApiKeyAuthService | undefined,
     odooService: OdooService,
-    useApiKeyAuth: boolean = false
+    useApiKeyAuth: boolean = false,
+    isAdminProxyMode: boolean = false
   ) {
     super();
     this.oauthService = oauthService;
     this.apiKeyAuthService = apiKeyAuthService;
     this.odooService = odooService;
     this.useApiKeyAuth = useApiKeyAuth;
+    this.isAdminProxyMode = isAdminProxyMode;
 
     // Handle incoming messages
     this.onMessage(async (context, next) => {
@@ -41,7 +45,8 @@ export class TimesheetBot extends TeamsActivityHandler {
     logger.info('TimesheetBot initialized', {
       oauthEnabled: !!oauthService,
       apiKeyAuthEnabled: !!apiKeyAuthService,
-      useApiKeyAuth
+      useApiKeyAuth,
+      isAdminProxyMode
     });
   }
 
@@ -56,7 +61,19 @@ export class TimesheetBot extends TeamsActivityHandler {
         if (member.id !== context.activity.recipient?.id) {
           const teamsUserId = member.id;
 
-          // Check if user is already authenticated
+          // In admin proxy mode, no authentication needed - welcome the user directly
+          if (this.isAdminProxyMode) {
+            const teamsEmail = await this.extractTeamsEmail(context, teamsUserId);
+            await context.sendActivity(
+              `Welcome to the Odoo Timesheet Bot! 🎉\n\n` +
+              `You're all set! Send a message like "Log 2 hours on Project X" to get started.` +
+              (teamsEmail ? `\n\nYour timesheets will be logged for: ${teamsEmail}` : '')
+            );
+            logger.info('Welcome message sent (admin proxy mode)', { memberId: teamsUserId, email: teamsEmail });
+            continue;
+          }
+
+          // Check if user is already authenticated (for non-admin-proxy modes)
           const isApiKeyAuth = this.apiKeyAuthService && await this.apiKeyAuthService.isAuthenticated(teamsUserId);
           const isOAuthAuth = this.oauthService && await this.oauthService.isAuthenticated(teamsUserId);
           const isAuthenticated = isApiKeyAuth || isOAuthAuth;
@@ -90,12 +107,12 @@ export class TimesheetBot extends TeamsActivityHandler {
   private async handleMessage(context: TurnContext): Promise<void> {
     try {
       const teamsUserId = context.activity.from.id;
-      // const teamsTenantId = context.activity.conversation.tenantId || '';
+      const teamsEmail = await this.extractTeamsEmail(context, teamsUserId);
 
       // Check if this is an adaptive card submit action
       const actionData = context.activity.value;
       if (actionData?.action === 'save_timesheet') {
-        await this.handleSaveTimesheet(context, actionData as TimesheetCardData);
+        await this.handleSaveTimesheet(context, actionData as TimesheetCardData, teamsEmail);
         return;
       }
       if (actionData?.action === 'cancel_timesheet') {
@@ -124,7 +141,9 @@ export class TimesheetBot extends TeamsActivityHandler {
 
       logger.info('Processing message', {
         userId: teamsUserId,
-        text: userText
+        email: teamsEmail,
+        text: userText,
+        adminProxyMode: this.isAdminProxyMode
       });
 
       // Handle special commands
@@ -132,47 +151,81 @@ export class TimesheetBot extends TeamsActivityHandler {
 
       // Handle connection status command
       if (lowerText === 'status' || lowerText === 'connection status') {
-        await this.handleConnectionStatus(context);
+        await this.handleConnectionStatus(context, teamsEmail);
         return;
       }
 
-      // Handle connect command
+      // Handle connect command (skip in admin proxy mode)
       if (lowerText === 'connect' || lowerText === 'connect to odoo' || lowerText === 'login') {
+        if (this.isAdminProxyMode) {
+          await context.sendActivity(
+            '✅ You\'re already connected via Admin Proxy mode. ' +
+            `Timesheets will be logged for: ${teamsEmail || 'your Teams email'}`
+          );
+          return;
+        }
         await this.handleConnectCommand(context);
         return;
       }
 
-      // Handle connect with apikey command
+      // Handle connect with apikey command (skip in admin proxy mode)
       if (lowerText === 'connect apikey' || lowerText === 'apikey') {
+        if (this.isAdminProxyMode) {
+          await context.sendActivity('API Key authentication is not needed in Admin Proxy mode.');
+          return;
+        }
         await this.handleApiKeyConnect(context);
         return;
       }
 
-      // Handle connect with oauth command
+      // Handle connect with oauth command (skip in admin proxy mode)
       if (lowerText === 'connect oauth' || lowerText === 'oauth') {
+        if (this.isAdminProxyMode) {
+          await context.sendActivity('OAuth authentication is not needed in Admin Proxy mode.');
+          return;
+        }
         await this.handleOAuthConnect(context);
         return;
       }
 
-      // Handle disconnect command
+      // Handle disconnect command (skip in admin proxy mode)
       if (lowerText === 'disconnect' || lowerText === 'logout') {
+        if (this.isAdminProxyMode) {
+          await context.sendActivity(
+            'Disconnect is not available in Admin Proxy mode. ' +
+            'Your account is automatically linked via your Teams email.'
+          );
+          return;
+        }
         await this.handleDisconnect(context);
         return;
       }
 
-      // Check if user is authenticated with either OAuth or API Key
-      const isApiKeyAuth = this.apiKeyAuthService && await this.apiKeyAuthService.isAuthenticated(teamsUserId);
-      const isOAuthAuth = this.oauthService && await this.oauthService.isAuthenticated(teamsUserId);
-      const isAuthenticated = isApiKeyAuth || isOAuthAuth;
+      // Skip authentication check in admin proxy mode
+      if (!this.isAdminProxyMode) {
+        // Check if user is authenticated with either OAuth or API Key
+        const isApiKeyAuth = this.apiKeyAuthService && await this.apiKeyAuthService.isAuthenticated(teamsUserId);
+        const isOAuthAuth = this.oauthService && await this.oauthService.isAuthenticated(teamsUserId);
+        const isAuthenticated = isApiKeyAuth || isOAuthAuth;
 
-      if (!isAuthenticated) {
-        // Show auth options if neither method is authenticated
-        const authUrl = this.oauthService ? buildAuthUrl(config.bot.publicUrl, teamsUserId, context) : undefined;
-        const optionsCard = createAuthOptionsCard(authUrl);
-        await context.sendActivity({
-          attachments: [optionsCard],
-          text: 'Please connect your Odoo account to log timesheets.'
-        });
+        if (!isAuthenticated) {
+          // Show auth options if neither method is authenticated
+          const authUrl = this.oauthService ? buildAuthUrl(config.bot.publicUrl, teamsUserId, context) : undefined;
+          const optionsCard = createAuthOptionsCard(authUrl);
+          await context.sendActivity({
+            attachments: [optionsCard],
+            text: 'Please connect your Odoo account to log timesheets.'
+          });
+          return;
+        }
+      }
+
+      // Validate we have an email for admin proxy mode
+      if (this.isAdminProxyMode && !teamsEmail) {
+        await context.sendActivity(
+          '❌ Could not retrieve your email from Teams. ' +
+          'Please ensure your Teams profile has an email address configured.'
+        );
         return;
       }
 
@@ -233,7 +286,10 @@ export class TimesheetBot extends TeamsActivityHandler {
       };
 
       const confirmCard = TimesheetCardGenerator.createConfirmationCard(cardData);
-      await context.sendActivity({ attachments: [confirmCard] });
+      await context.sendActivity({
+        text: `Please confirm your timesheet:\n\nProject: ${cardData.project_name}\nTask: ${cardData.task_name || 'None'}\nHours: ${cardData.hours}\nDate: ${cardData.date}\nDescription: ${cardData.description}`,
+        attachments: [confirmCard]
+      });
 
       logger.info('Confirmation card sent', { cardData });
 
@@ -246,10 +302,127 @@ export class TimesheetBot extends TeamsActivityHandler {
   }
 
   /**
+   * Extract Teams email from context
+   * Tries multiple sources to get the user's email
+   */
+  private async extractTeamsEmail(context: TurnContext, teamsUserId: string): Promise<string | undefined> {
+    try {
+      // DEV/TEST MODE: Override email from environment variable
+      // Use this for testing with Bot Framework Emulator
+      if (process.env.TEST_USER_EMAIL) {
+        return process.env.TEST_USER_EMAIL.toLowerCase().trim();
+      }
+
+      // Method 1: Try to get from activity.from (most common in Teams)
+      const from = context.activity.from;
+      if (from?.aadObjectId) {
+        // In Teams, the email might be in the name field or we can get it from additional properties
+        const name = from.name || '';
+
+        // Check if the name looks like an email
+        if (name.includes('@')) {
+          return name.toLowerCase().trim();
+        }
+      }
+
+      // Method 2: Check channelData for Teams-specific info
+      const channelData = context.activity.channelData as any;
+      if (channelData?.tenant?.id) {
+        // We're in Teams context
+        const teamsContext = channelData;
+
+        // Try to get email from various places in Teams context
+        const email =
+          teamsContext?.from?.aadObjectId || // Sometimes this is the email
+          teamsContext?.user?.email ||
+          teamsContext?.message?.from?.user?.email;
+
+        if (email && email.includes('@')) {
+          return email.toLowerCase().trim();
+        }
+      }
+
+      // Method 3: Try to use Bot Framework's getConversationMember
+      // This requires the Teams-specific API
+      try {
+        const member = await TeamsInfo.getMember(context, teamsUserId);
+        if (member?.email) {
+          return member.email.toLowerCase().trim();
+        }
+      } catch (memberError) {
+        logger.debug('Could not get member info via TeamsInfo', { error: memberError });
+      }
+
+      // Method 4: Check if from.id is an email
+      if (teamsUserId && teamsUserId.includes('@')) {
+        return teamsUserId.toLowerCase().trim();
+      }
+
+      logger.warn('Could not extract email from Teams context', {
+        from: context.activity.from,
+        channelData: context.activity.channelData
+      });
+
+      return undefined;
+
+    } catch (error) {
+      logger.error('Error extracting Teams email', { error, teamsUserId });
+      return undefined;
+    }
+  }
+
+  /**
    * Handle connection status command
    */
-  private async handleConnectionStatus(context: TurnContext): Promise<void> {
+  private async handleConnectionStatus(context: TurnContext, teamsEmail?: string): Promise<void> {
     const teamsUserId = context.activity.from.id;
+
+    // Admin proxy mode - show connection status based on email lookup
+    if (this.isAdminProxyMode) {
+      const email = teamsEmail || await this.extractTeamsEmail(context, teamsUserId);
+
+      if (!email) {
+        await context.sendActivity({
+          attachments: [createConnectionStatusCard(false, undefined, undefined,
+            '⚠️ Could not retrieve your Teams email. Please ensure your Teams profile has an email configured.')]
+        });
+        return;
+      }
+
+      // Check if user exists in Odoo
+      try {
+        const odooUser = await this.odooService.lookupUserByEmail(email);
+        if (odooUser) {
+          await context.sendActivity({
+            attachments: [createConnectionStatusCard(
+              true,
+              `${odooUser.name} (${odooUser.login})`,
+              undefined,
+              '✅ Admin Proxy Mode: Your timesheets will be logged via the admin account.'
+            )]
+          });
+        } else {
+          await context.sendActivity({
+            attachments: [createConnectionStatusCard(
+              false,
+              undefined,
+              undefined,
+              `⚠️ No Odoo user found with email: ${email}. Please contact your administrator.`
+            )]
+          });
+        }
+      } catch (error) {
+        await context.sendActivity({
+          attachments: [createConnectionStatusCard(
+            false,
+            undefined,
+            undefined,
+            '❌ Error looking up your Odoo account. Please try again later.'
+          )]
+        });
+      }
+      return;
+    }
 
     // Handle API Key auth
     if (this.useApiKeyAuth && this.apiKeyAuthService) {
@@ -452,12 +625,13 @@ export class TimesheetBot extends TeamsActivityHandler {
    */
   private async handleSaveTimesheet(
     context: TurnContext,
-    data: TimesheetCardData
+    data: TimesheetCardData,
+    teamsEmail?: string
   ): Promise<void> {
     const teamsUserId = context.activity.from.id;
 
     try {
-      logger.info('Saving timesheet to Odoo', { data, teamsUserId });
+      logger.info('Saving timesheet to Odoo', { data, teamsUserId, teamsEmail });
 
       let taskId = data.task_id;
       let taskName = data.task_name;
@@ -505,12 +679,19 @@ export class TimesheetBot extends TeamsActivityHandler {
         description: data.description
       };
 
-      // Create timesheet in Odoo with user-specific authentication
-      const timesheetId = await this.odooService.logTime(entry, teamsUserId);
+      // Create timesheet in Odoo
+      // For admin proxy mode, pass the email; otherwise pass the userId
+      let timesheetId: number;
+      if (this.isAdminProxyMode && teamsEmail) {
+        timesheetId = await this.odooService.logTime(entry, undefined, teamsEmail);
+      } else {
+        timesheetId = await this.odooService.logTime(entry, teamsUserId);
+      }
 
       logger.info('Timesheet saved successfully', {
         timesheetId,
-        userId: teamsUserId
+        userId: teamsUserId,
+        email: teamsEmail
       });
 
       // Update data with the new task info for the confirmed card
@@ -531,10 +712,10 @@ export class TimesheetBot extends TeamsActivityHandler {
       logger.info('Confirmation card updated');
 
     } catch (error) {
-      logger.error('Failed to save timesheet', { error, data, teamsUserId });
+      logger.error('Failed to save timesheet', { error, data, teamsUserId, teamsEmail });
 
-      // Handle authentication errors specifically
-      if (error instanceof AuthRequiredError) {
+      // Handle authentication errors specifically (not applicable for admin proxy)
+      if (!this.isAdminProxyMode && error instanceof AuthRequiredError) {
         const authUrl = buildAuthUrl(config.bot.publicUrl, teamsUserId, context);
         const reauthCard = createReauthCard(authUrl);
         await context.sendActivity({

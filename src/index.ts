@@ -19,15 +19,15 @@ let apiKeyAuthService: ApiKeyAuthService | undefined;
 let tokenRefreshJob: TokenRefreshJob | undefined;
 let odooService: OdooService;
 
-// Authentication mode: 'service_account' | 'oauth' | 'api_key'
+// Authentication mode: 'service_account' | 'oauth' | 'api_key' | 'admin_proxy'
 const AUTH_MODE = process.env.AUTH_MODE || 'api_key'; // Default to API key for multi-user support
 
 /**
  * Initialize authentication services based on AUTH_MODE
  */
 async function initializeAuth(): Promise<void> {
-  // Initialize token storage for all modes except service_account
-  if (AUTH_MODE !== 'service_account') {
+  // Initialize token storage for api_key and oauth modes
+  if (AUTH_MODE === 'api_key' || AUTH_MODE === 'oauth') {
     try {
       const dbPath = config.tokenStorage?.dbPath || './data/tokens.db';
       const dbDir = path.dirname(dbPath);
@@ -69,6 +69,10 @@ async function initializeAuth(): Promise<void> {
       logger.error('Failed to initialize API Key auth service', { error });
       throw error;
     }
+  }
+
+  if (AUTH_MODE === 'admin_proxy') {
+    logger.info('Admin proxy mode enabled - timesheets will be logged via admin account with user email lookup');
   }
 
   if (AUTH_MODE === 'service_account') {
@@ -158,12 +162,13 @@ async function startServer(): Promise<void> {
     await initializeAuth();
 
     // Initialize Odoo service with appropriate auth services
-    odooService = new OdooService(config.odoo, oauthService, apiKeyAuthService);
-    logger.info('Odoo service initialized', { authMode: AUTH_MODE });
+    const isAdminProxyMode = AUTH_MODE === 'admin_proxy';
+    odooService = new OdooService(config.odoo, oauthService, apiKeyAuthService, isAdminProxyMode);
+    logger.info('Odoo service initialized', { authMode: AUTH_MODE, adminProxyMode: isAdminProxyMode });
 
     // Create bot instance with initialized services
     const useApiKeyAuth = AUTH_MODE === 'api_key';
-    bot = new TimesheetBot(oauthService, apiKeyAuthService, odooService, useApiKeyAuth);
+    bot = new TimesheetBot(oauthService, apiKeyAuthService, odooService, useApiKeyAuth, isAdminProxyMode);
 
     // Register bot endpoint
     registerBotEndpoint();
@@ -201,6 +206,8 @@ async function startServer(): Promise<void> {
         console.log(`OAuth endpoints available at ${config.bot.publicUrl}/auth/oauth/*`);
       } else if (AUTH_MODE === 'api_key') {
         console.log(`API Key authentication enabled for multi-user support`);
+      } else if (AUTH_MODE === 'admin_proxy') {
+        console.log(`Admin Proxy mode enabled - timesheets logged via admin account with user email lookup`);
       } else {
         console.log(`Service account mode (single user)`);
       }

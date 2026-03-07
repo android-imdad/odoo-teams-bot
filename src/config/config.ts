@@ -46,18 +46,37 @@ class ConfigValidator {
       );
     }
 
-    // Validate that service account mode is only used in development
+    // Validate auth mode
     const authMode = process.env.AUTH_MODE || 'api_key';
+    const validAuthModes = ['service_account', 'oauth', 'api_key', 'admin_proxy'];
+
+    if (!validAuthModes.includes(authMode)) {
+      throw new Error(
+        `Invalid AUTH_MODE: ${authMode}. Must be one of: ${validAuthModes.join(', ')}`
+      );
+    }
+
+    // Validate that service account mode is only used in development
     if (authMode === 'service_account') {
       if (process.env.NODE_ENV === 'production') {
         throw new Error(
           'Service account mode (AUTH_MODE=service_account) is not allowed in production. ' +
-          'Please use AUTH_MODE=api_key or AUTH_MODE=oauth for per-user authentication.'
+          'Please use AUTH_MODE=api_key, AUTH_MODE=oauth, or AUTH_MODE=admin_proxy for per-user authentication.'
         );
       }
       console.warn('⚠️  WARNING: Using service account mode. This should only be used for testing/development.');
       console.warn('   All users will share the same Odoo account. Timesheets will be logged as the service account user.');
-      console.warn('   For production, use API Key or OAuth authentication instead.\n');
+      console.warn('   For production, use API Key, OAuth, or Admin Proxy authentication instead.\n');
+    }
+
+    // Validate admin_proxy mode requires service account credentials
+    if (authMode === 'admin_proxy') {
+      if (!process.env.ODOO_USERNAME || !process.env.ODOO_PASSWORD) {
+        throw new Error(
+          'Admin proxy mode (AUTH_MODE=admin_proxy) requires ODOO_USERNAME and ODOO_PASSWORD ' +
+          'for the admin service account that will log timesheets on behalf of users.'
+        );
+      }
     }
 
     // Validate OAuth config if OAuth is enabled

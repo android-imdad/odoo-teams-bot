@@ -35,7 +35,8 @@ src/
 │   ├── taskFilter.ts             # Fuse.js fuzzy search for task filtering
 │   ├── audit.ts                  # Audit trail logging for compliance
 │   ├── health.ts                 # Health checks and monitoring endpoints
-│   └── resilience.ts             # Graceful degradation and offline queuing
+│   ├── resilience.ts             # Graceful degradation and offline queuing
+│   └── userMapping.ts            # Teams email to Odoo user mapping (admin proxy mode)
 ├── cards/
 │   └── timesheetCard.ts          # Adaptive Card templates
 ├── middleware/
@@ -85,8 +86,24 @@ PORT=3978
 # Odoo Configuration
 ODOO_URL=https://your-odoo-instance.com
 ODOO_DB=your-database-name
-ODOO_USERNAME=your-username
-ODOO_PASSWORD=your-password
+
+# Authentication Mode: service_account | api_key | oauth | admin_proxy
+AUTH_MODE=admin_proxy
+
+# For admin_proxy mode (recommended for enterprise):
+# Uses admin account to log timesheets on behalf of users matched by email
+ODOO_USERNAME=admin@yourcompany.com
+ODOO_PASSWORD=your-admin-password
+
+# For api_key mode (users generate their own API keys):
+# ODOO_USERNAME and ODOO_PASSWORD not required
+
+# For oauth mode:
+OAUTH_ENABLED=true
+ODOO_OAUTH_CLIENT_ID=your-client-id
+ODOO_OAUTH_CLIENT_SECRET=your-client-secret
+ODOO_OAUTH_REDIRECT_URI=https://your-bot-url/auth/oauth/callback
+TOKEN_ENCRYPTION_KEY=YOUR_API_KEY_HERE
 
 # Gemini AI Configuration
 GEMINI_API_KEY=your-gemini-api-key
@@ -102,6 +119,66 @@ LOG_FILE=logs/bot.log
 # Environment
 NODE_ENV=production
 ```
+
+## Authentication Modes
+
+The bot supports four authentication modes, configurable via `AUTH_MODE`:
+
+### 1. Admin Proxy Mode (`AUTH_MODE=admin_proxy`) - RECOMMENDED
+
+**Best for:** Enterprise environments where IT manages Odoo access centrally.
+
+**How it works:**
+- The bot uses a single admin service account to authenticate with Odoo
+- When a user sends a timesheet entry, the bot extracts their email from Teams
+- The bot looks up the user's Odoo account by matching the email in `res.users`
+- Timesheets are logged using the admin account but attributed to the matched user
+
+**Setup:**
+1. Create an admin service account in Odoo with rights to create timesheets for all users
+2. Set `AUTH_MODE=admin_proxy`
+3. Configure `ODOO_USERNAME` and `ODOO_PASSWORD` with the admin credentials
+4. Ensure users' Teams emails match their Odoo login emails
+
+**Benefits:**
+- Users don't need to authenticate or manage API keys
+- Zero-friction onboarding - users can start logging immediately
+- IT maintains centralized control
+
+### 2. API Key Mode (`AUTH_MODE=api_key`)
+
+**Best for:** Teams where users can manage their own API keys.
+
+**How it works:**
+- Each user generates an API Key in their Odoo profile
+- Users connect their account by providing the API Key to the bot
+- The bot stores encrypted API keys and uses them for per-user authentication
+
+**Setup:**
+- Set `AUTH_MODE=api_key`
+- Users run "connect" command and enter their API Key
+
+### 3. OAuth Mode (`AUTH_MODE=oauth`)
+
+**Best for:** Self-hosted Odoo with OAuth provider configured.
+
+**How it works:**
+- Users authenticate via OAuth flow
+- The bot receives and stores access/refresh tokens
+- Tokens are used for per-user API calls
+
+**Setup:**
+- Set `AUTH_MODE=oauth` and `OAUTH_ENABLED=true`
+- Configure OAuth provider in Odoo
+- Set up OAuth application credentials
+
+### 4. Service Account Mode (`AUTH_MODE=service_account`)
+
+**Best for:** Single-user testing only.
+
+**⚠️ WARNING:** Not for production. All users share the same Odoo account.
+
+## API Endpoints
 
 ## Commands
 
@@ -132,6 +209,54 @@ npm run validate         # Validate configuration
 | `/health` | GET | Health check status |
 | `/metrics` | GET | Prometheus metrics |
 | `/api/messages` | POST | Bot messaging endpoint |
+
+## User Email Mapping (Admin Proxy Mode)
+
+When using `AUTH_MODE=admin_proxy`, the bot automatically maps Teams users to Odoo users via email:
+
+### How It Works
+
+1. **Extract Email:** The bot extracts the user's email from the Teams context using multiple methods:
+   - `activity.from.name` (if it contains an email)
+   - Teams channel data
+   - `TeamsInfo.getMember()` API (most reliable)
+
+2. **Look Up User:** The admin service account searches Odoo's `res.users` model:
+   ```python
+   # Odoo search domain
+   [('login', '=ilike', user_email), ('active', '=', true)]
+   ```
+
+3. **Log Timesheet:** Creates the timesheet entry with the matched user's ID:
+   ```python
+   {
+     'project_id': project_id,
+     'task_id': task_id,
+     'user_id': matched_user_id,  # The user found by email
+     'unit_amount': hours,
+     'date': date,
+     'name': description
+   }
+   ```
+
+### Email Matching Requirements
+
+For successful matching, ensure:
+- The user's Teams email matches their Odoo login email (case-insensitive)
+- The Odoo user account is active
+- The admin service account has read access to `res.users`
+
+### Caching
+
+User lookups are cached for 1 hour to reduce Odoo API calls. Failed lookups are cached for 5 minutes to avoid repeated searches for non-existent users.
+
+### Troubleshooting
+
+If a user gets "No Odoo user found" error:
+1. Verify their Teams email matches their Odoo login
+2. Check the user is active in Odoo
+3. Use the `status` command to see what email the bot detects
+4. Check logs for the actual email being looked up
 
 ## Key Patterns
 

@@ -142,7 +142,8 @@ export function createReauthCard(authUrl: string): Attachment {
 export function createConnectionStatusCard(
   isConnected: boolean,
   username?: string,
-  authUrl?: string
+  authUrl?: string,
+  message?: string
 ): Attachment {
   if (isConnected && username) {
     return CardFactory.adaptiveCard({
@@ -184,7 +185,14 @@ export function createConnectionStatusCard(
                   text: `Odoo User: ${username}`,
                   isSubtle: true,
                   spacing: 'None'
-                }
+                },
+                ...(message ? [{
+                  type: 'TextBlock',
+                  text: message,
+                  wrap: true,
+                  spacing: 'Small',
+                  size: 'Small'
+                } as any] : [])
               ]
             }
           ]
@@ -240,9 +248,10 @@ export function createConnectionStatusCard(
               },
               {
                 type: 'TextBlock',
-                text: 'Connect your Odoo account to log timesheets',
+                text: message || 'Connect your Odoo account to log timesheets',
                 isSubtle: true,
-                spacing: 'None'
+                spacing: 'None',
+                wrap: true
               }
             ]
           }
