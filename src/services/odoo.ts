@@ -183,6 +183,7 @@ class OdooService {
       }
 
       // Try to read project details with code field (for standard Odoo installations)
+      // Some Odoo versions (18+) don't have the 'code' field on project.project
       let projects: any[];
       try {
         projects = await this.executeKw(
@@ -190,14 +191,24 @@ class OdooService {
           'read',
           [projectIds, ['id', 'name', 'code', 'active']]
         );
-      } catch (fieldError) {
-        // If 'code' field doesn't exist (Odoo Online trial), try without it
-        logger.debug('Project "code" field not available, fetching without it');
-        projects = await this.executeKw(
-          'project.project',
-          'read',
-          [projectIds, ['id', 'name', 'active']]
-        );
+      } catch (fieldError: any) {
+        // The executeKw wrapper converts XML-RPC faults to plain Error objects,
+        // so we need to check the error message string for the field name
+        const errorMessage = String(fieldError.message || fieldError.faultString || fieldError);
+        if (
+          errorMessage.includes("Invalid field 'code'") ||
+          errorMessage.includes("Invalid field") && errorMessage.includes("code") ||
+          errorMessage.includes("KeyError: 'code'")
+        ) {
+          logger.info('Project "code" field not available on this Odoo version, fetching without it');
+          projects = await this.executeKw(
+            'project.project',
+            'read',
+            [projectIds, ['id', 'name', 'active']]
+          );
+        } else {
+          throw fieldError;
+        }
       }
 
       const mappedProjects: OdooProject[] = projects.map((p: any) => ({
