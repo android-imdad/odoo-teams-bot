@@ -38,6 +38,10 @@ describe('TimesheetBot - Admin Proxy Mode', () => {
   let mockContext: Partial<TurnContext>;
 
   beforeEach(() => {
+    // Clear the dev/test email override so extractTeamsEmail uses the normal
+    // Teams extraction logic (dotenv.config() in config.ts re-adds this from .env)
+    delete process.env.TEST_USER_EMAIL;
+
     mockOdooService = {
       getProjects: jest.fn(),
       getTasks: jest.fn(),

@@ -27,6 +27,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@azure/identity": "^4.13.1",
     "@google/generative-ai": "^0.24.1",
     "adaptivecards": "^3.0.0",
     "botbuilder": "^4.20.0",

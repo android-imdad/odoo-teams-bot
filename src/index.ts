@@ -84,10 +84,29 @@ async function initializeAuth(): Promise<void> {
 let bot: TimesheetBot;
 
 // Create bot adapter
-const adapter = new BotFrameworkAdapter({
-  appId: config.bot.appId || '',
-  appPassword: config.bot.appPassword || ''
-});
+// For managed identity: appId is required, appPassword is empty
+// For traditional auth: both appId and appPassword are required
+const adapterSettings = config.managedIdentity.enabled
+  ? {
+      appId: config.bot.appId,
+      // For managed identity, we don't need appPassword
+      // The adapter will use the app ID to authenticate incoming requests
+      appPassword: ''
+    }
+  : {
+      appId: config.bot.appId || '',
+      appPassword: config.bot.appPassword || ''
+    };
+
+const adapter = new BotFrameworkAdapter(adapterSettings);
+
+// Log managed identity status
+if (config.managedIdentity.enabled) {
+  logger.info('Managed identity authentication enabled', {
+    appId: config.managedIdentity.appId,
+    clientId: config.managedIdentity.clientId
+  });
+}
 
 // Error handler for adapter
 adapter.onTurnError = async (context, error) => {
@@ -199,9 +218,23 @@ async function startServer(): Promise<void> {
       logger.info(`Bot server started`, {
         port: config.bot.port,
         environment: config.environment,
-        authMode: AUTH_MODE
+        authMode: AUTH_MODE,
+        managedIdentity: config.managedIdentity.enabled
       });
       console.log(`Bot server listening on port ${config.bot.port}`);
+
+      // Log authentication mode
+      if (config.managedIdentity.enabled) {
+        console.log(`\n🔒 Managed Identity Authentication Enabled`);
+        console.log(`  Bot App ID: ${config.bot.appId}`);
+        if (config.managedIdentity.clientId) {
+          console.log(`  Managed Identity Client ID: ${config.managedIdentity.clientId}`);
+        }
+        console.log(`  No BOT_PASSWORD required - using Azure Managed Identity\n`);
+      } else {
+        console.log(`Bot App ID: ${config.bot.appId}`);
+      }
+
       if (AUTH_MODE === 'oauth') {
         console.log(`OAuth endpoints available at ${config.bot.publicUrl}/auth/oauth/*`);
       } else if (AUTH_MODE === 'api_key') {

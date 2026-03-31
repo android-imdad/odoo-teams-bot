@@ -33,7 +33,8 @@ class ConfigValidator {
       description: 'Microsoft Teams Bot Application ID'
     },
     BOT_PASSWORD: {
-      required: true,
+      // Not required when using Azure Managed Identity
+      required: process.env.AZURE_USE_MANAGED_IDENTITY !== 'true',
       type: 'string',
       envVar: 'BOT_PASSWORD',
       description: 'Microsoft Teams Bot Client Secret'
@@ -64,13 +65,15 @@ class ConfigValidator {
       description: 'Odoo database name'
     },
     ODOO_USERNAME: {
-      required: true,
+      // Only required for service_account and admin_proxy modes
+      required: ['service_account', 'admin_proxy'].includes(process.env.AUTH_MODE || ''),
       type: 'string',
       envVar: 'ODOO_USERNAME',
       description: 'Odoo username'
     },
     ODOO_PASSWORD: {
-      required: true,
+      // Only required for service_account and admin_proxy modes
+      required: ['service_account', 'admin_proxy'].includes(process.env.AUTH_MODE || ''),
       type: 'string',
       envVar: 'ODOO_PASSWORD',
       description: 'Odoo password'

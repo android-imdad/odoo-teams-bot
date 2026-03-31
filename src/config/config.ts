@@ -26,6 +26,12 @@ interface Config {
   };
   environment: string;
   oauthEnabled: boolean;
+  managedIdentity: {
+    enabled: boolean;
+    appId: string;
+    tenantId?: string;
+    clientId?: string; // For user-assigned managed identity
+  };
 }
 
 class ConfigValidator {
@@ -54,6 +60,28 @@ class ConfigValidator {
       throw new Error(
         `Invalid AUTH_MODE: ${authMode}. Must be one of: ${validAuthModes.join(', ')}`
       );
+    }
+
+    // Validate managed identity config
+    const useManagedIdentity = process.env.AZURE_USE_MANAGED_IDENTITY === 'true';
+
+    if (useManagedIdentity) {
+      // For managed identity, BOT_ID is required, but BOT_PASSWORD is optional
+      if (!process.env.BOT_ID) {
+        throw new Error(
+          'Managed identity mode requires BOT_ID to be set. ' +
+          'Set BOT_ID from your Azure Bot\'s Microsoft App ID.'
+        );
+      }
+      // Note: Detailed managed identity info is logged via logger in index.ts after startup
+    } else {
+      // Traditional authentication - requires both BOT_ID and BOT_PASSWORD
+      if (!process.env.BOT_ID || !process.env.BOT_PASSWORD) {
+        throw new Error(
+          'Traditional authentication requires both BOT_ID and BOT_PASSWORD. ' +
+          'Set AZURE_USE_MANAGED_IDENTITY=true if using managed identity.'
+        );
+      }
     }
 
     // Validate that service account mode is only used in development
@@ -134,10 +162,13 @@ const tokenStorageConfig: TokenStorageConfig | undefined = oauthEnabled
     }
   : undefined;
 
+// Determine if using managed identity
+const useManagedIdentity = process.env.AZURE_USE_MANAGED_IDENTITY === 'true';
+
 export const config: Config = {
   bot: {
     appId: process.env.BOT_ID!,
-    appPassword: process.env.BOT_PASSWORD!,
+    appPassword: useManagedIdentity ? '' : (process.env.BOT_PASSWORD || ''),
     port: parseInt(process.env.PORT || '3978', 10),
     publicUrl: process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || '3978'}`
   },
@@ -161,5 +192,11 @@ export const config: Config = {
     file: process.env.LOG_FILE || 'logs/bot.log'
   },
   environment: process.env.NODE_ENV || 'development',
-  oauthEnabled
+  oauthEnabled,
+  managedIdentity: {
+    enabled: useManagedIdentity,
+    appId: process.env.BOT_ID!,
+    tenantId: process.env.AZURE_TENANT_ID,
+    clientId: process.env.AZURE_CLIENT_ID // For user-assigned managed identity
+  }
 };

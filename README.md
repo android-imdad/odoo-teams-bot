@@ -11,6 +11,7 @@ A Microsoft Teams bot that uses AI to parse natural language timesheet entries a
 - **Flexible Input**: Supports various date and hour formats
 - **Comprehensive Logging**: Advanced Winston-based logging with file rotation
 - **Docker Ready**: Containerized deployment for easy setup and scaling
+- **Multiple Authentication Modes**: Support for API Key, OAuth, Service Account, and Admin Proxy modes
 
 ## Prerequisites
 
@@ -49,8 +50,9 @@ BOT_ID=your-bot-id
 BOT_PASSWORD=your-bot-password
 ODOO_URL=https://your-odoo.com
 ODOO_DB=your-database
-ODOO_USERNAME=your-username
-ODOO_PASSWORD=your-password
+AUTH_MODE=admin_proxy
+ODOO_USERNAME=admin@yourcompany.com
+ODOO_PASSWORD=your-admin-password
 GEMINI_API_KEY=your-gemini-key
 ```
 
@@ -433,18 +435,109 @@ src/
 | Variable | Description | Required | Default |
 |----------|-------------|----------|---------|
 | BOT_ID | Microsoft Bot ID | Yes | - |
-| BOT_PASSWORD | Microsoft Bot Password | Yes | - |
+| BOT_PASSWORD | Microsoft Bot Password | Yes (unless using Managed Identity) | - |
+| AZURE_USE_MANAGED_IDENTITY | Use Azure Managed Identity | No | false |
+| AZURE_CLIENT_ID | Managed Identity Client ID | For User-Assigned MI| - |
+| AZURE_TENANT_ID | Azure Tenant ID | No | - |
 | PORT | HTTP server port | No | 3978 |
 | ODOO_URL | Odoo instance URL | Yes | - |
 | ODOO_DB | Odoo database name | Yes | - |
-| ODOO_USERNAME | Odoo username | Yes | - |
-| ODOO_PASSWORD | Odoo password | Yes | - |
+| ODOO_USERNAME | Odoo admin username | For admin_proxy/service_account | - |
+| ODOO_PASSWORD | Odoo admin password | For admin_proxy/service_account | - |
+| AUTH_MODE | Authentication mode | No | api_key |
 | GEMINI_API_KEY | Google Gemini API key | Yes | - |
 | GEMINI_MODEL | Gemini model name | No | gemini-3-flash-preview |
 | PROJECT_CACHE_TTL | Project cache duration (ms) | No | 3600000 (1 hour) |
 | LOG_LEVEL | Logging level | No | info |
 | LOG_FILE | Log file path | No | logs/bot.log |
 | NODE_ENV | Environment | No | development |
+
+### Azure Managed Identity (Recommended for Production)
+
+**User-Assigned Managed Identity** eliminates the need to manage client secrets for your Azure Bot.
+
+#### Benefits:
+- ✅ No secrets to manage or rotate
+- ✅ Azure handles authentication automatically
+- ✅ More secure than client secrets
+- ✅ Works seamlessly with Azure App Service
+
+#### Setup Steps:
+
+1. **Create Azure Bot in Azure Portal**
+   - Go to Azure Portal → Create "Azure Bot"
+   - Select "User-assigned managed identity" as the app type
+   - Note the **Microsoft App ID** (this is your `BOT_ID`)
+
+2. **Create Managed Identity**
+   - Go to Azure Portal → Create "User-Assigned Managed Identity"
+   - Copy the **Client ID** (this is your `AZURE_CLIENT_ID`)
+
+3. **Configure `.env`**
+   ```bash
+   AZURE_USE_MANAGED_IDENTITY=true
+   BOT_ID=<from Azure Bot - Microsoft App ID>
+   AZURE_CLIENT_ID=<from Managed Identity>
+   # BOT_PASSWORD is not needed!
+   ```
+
+4. **Deploy to Azure App Service**
+   - Assign the managed identity to your App Service
+   - The bot will automatically authenticate using Azure AD
+
+#### For Local Development:
+
+Set `AZURE_USE_MANAGED_IDENTITY=false` and use traditional authentication:
+```bash
+BOT_ID=your-bot-id
+BOT_PASSWORD=your-client-secret
+```
+
+Or use Azure CLI for local authentication:
+```bash
+az login
+```
+
+The `DefaultAzureCredential` will automatically use your Azure CLI credentials.
+
+### Authentication Modes
+
+The bot supports four authentication modes, configurable via `AUTH_MODE`:
+
+#### 1. Admin Proxy Mode (`AUTH_MODE=admin_proxy`) - RECOMMENDED
+
+Best for enterprise environments where IT manages Odoo access centrally.
+
+- Uses a single admin service account to authenticate with Odoo
+- When a user sends a timesheet entry, the bot extracts their email from Teams
+- The bot looks up the user's Odoo account by matching the email in `res.users`
+- Timesheets are logged using the admin account but attributed to the matched user
+
+**Setup:**
+```env
+AUTH_MODE=admin_proxy
+ODOO_USERNAME=admin@yourcompany.com
+ODOO_PASSWORD=your-admin-password
+```
+
+#### 2. API Key Mode (`AUTH_MODE=api_key`)
+
+Best for teams where users can manage their own API keys.
+
+- Each user generates an API Key in their Odoo profile
+- Users connect their account by providing the API Key to the bot
+- The bot stores encrypted API keys and uses them for per-user authentication
+
+#### 3. OAuth Mode (`AUTH_MODE=oauth`)
+
+Best for self-hosted Odoo with OAuth provider configured.
+
+- Users authenticate via OAuth flow
+- The bot receives and stores access/refresh tokens
+
+#### 4. Service Account Mode (`AUTH_MODE=service_account`)
+
+⚠️ Testing only - not for production. All users share the same Odoo account.
 
 ### Odoo Configuration
 
@@ -457,6 +550,7 @@ The bot requires:
 **Required Odoo Permissions:**
 - Read access to projects
 - Create access to timesheet entries (account.analytic.line)
+- For admin_proxy mode: Read access to `res.users` model (for email lookup)
 
 ## Logging
 
@@ -551,6 +645,20 @@ Logs are written to:
 3. **Check user has access:**
    - Verify Odoo user can see projects
    - Check project security rules
+
+### Admin Proxy Issues (admin_proxy mode)
+
+1. **Verify email matching:**
+   - Ensure users' Teams emails match their Odoo login emails
+   - Check that the Odoo user account is active
+
+2. **Check user lookup:**
+   - Run the `status` command to see what email the bot detects
+   - Review logs for "lookupUserByEmail" entries
+
+3. **Verify admin permissions:**
+   - Admin account needs read access to `res.users` model
+   - Admin must be able to create timesheets for other users
 
 ### Docker issues
 

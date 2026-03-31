@@ -10,20 +10,26 @@ export class TimesheetCardGenerator {
     const card = {
       type: 'AdaptiveCard',
       $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
-      version: '1.2',
+      version: '1.5',
       body: [
         {
-          type: 'TextBlock',
-          text: 'Timesheet Entry',
-          weight: 'Bolder',
-          size: 'Large',
-          color: 'Accent'
-        },
-        {
-          type: 'TextBlock',
-          text: 'Please confirm the following details:',
-          wrap: true,
-          spacing: 'Small'
+          type: 'Container',
+          items: [
+            {
+              type: 'TextBlock',
+              text: 'Timesheet Entry',
+              weight: 'Bolder',
+              size: 'Large',
+              color: 'Accent'
+            },
+            {
+              type: 'TextBlock',
+              text: 'Please confirm the following details:',
+              wrap: true,
+              spacing: 'Small',
+              isSubtle: true
+            }
+          ]
         },
         ...(data.create_new_task && data.new_task_name ? [
           {
@@ -91,22 +97,28 @@ export class TimesheetCardGenerator {
     const card = {
       type: 'AdaptiveCard',
       $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
-      version: '1.2',
+      version: '1.5',
       body: [
         {
-          type: 'TextBlock',
-          text: '✓ Timesheet Confirmed',
-          weight: 'Bolder',
-          size: 'Large',
-          color: 'Good'
-        },
-        {
-          type: 'TextBlock',
-          text: data.create_new_task
-            ? 'Your timesheet has been saved to Odoo. A new task was created.'
-            : 'Your timesheet has been saved to Odoo.',
-          wrap: true,
-          spacing: 'Small'
+          type: 'Container',
+          items: [
+            {
+              type: 'TextBlock',
+              text: '✓ Timesheet Confirmed',
+              weight: 'Bolder',
+              size: 'Large',
+              color: 'Good'
+            },
+            {
+              type: 'TextBlock',
+              text: data.create_new_task
+                ? 'Your timesheet has been saved to Odoo. A new task was created.'
+                : 'Your timesheet has been saved to Odoo.',
+              wrap: true,
+              spacing: 'Small',
+              isSubtle: true
+            }
+          ]
         },
         {
           type: 'FactSet',
@@ -147,20 +159,26 @@ export class TimesheetCardGenerator {
     const card = {
       type: 'AdaptiveCard',
       $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
-      version: '1.2',
+      version: '1.5',
       body: [
         {
-          type: 'TextBlock',
-          text: '✗ Timesheet Cancelled',
-          weight: 'Bolder',
-          size: 'Large',
-          color: 'Warning'
-        },
-        {
-          type: 'TextBlock',
-          text: 'No timesheet entry was created.',
-          wrap: true,
-          spacing: 'Small'
+          type: 'Container',
+          items: [
+            {
+              type: 'TextBlock',
+              text: '✗ Timesheet Cancelled',
+              weight: 'Bolder',
+              size: 'Large',
+              color: 'Warning'
+            },
+            {
+              type: 'TextBlock',
+              text: 'No timesheet entry was created.',
+              wrap: true,
+              spacing: 'Small',
+              isSubtle: true
+            }
+          ]
         },
         {
           type: 'FactSet',
@@ -201,21 +219,26 @@ export class TimesheetCardGenerator {
     const card = {
       type: 'AdaptiveCard',
       $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
-      version: '1.2',
+      version: '1.5',
       body: [
         {
-          type: 'TextBlock',
-          text: 'Unable to Parse Timesheet',
-          weight: 'Bolder',
-          size: 'Large',
-          color: 'Attention'
-        },
-        {
-          type: 'TextBlock',
-          text: errorMessage,
-          wrap: true,
-          color: 'Attention',
-          spacing: 'Medium'
+          type: 'Container',
+          items: [
+            {
+              type: 'TextBlock',
+              text: 'Unable to Parse Timesheet',
+              weight: 'Bolder',
+              size: 'Large',
+              color: 'Attention'
+            },
+            {
+              type: 'TextBlock',
+              text: errorMessage,
+              wrap: true,
+              color: 'Attention',
+              spacing: 'Medium'
+            }
+          ]
         },
         ...(originalText ? [
           {
@@ -257,20 +280,26 @@ export class TimesheetCardGenerator {
     const card = {
       type: 'AdaptiveCard',
       $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
-      version: '1.2',
+      version: '1.5',
       body: [
         {
-          type: 'TextBlock',
-          text: '✓ Timesheet Saved',
-          weight: 'Bolder',
-          size: 'Large',
-          color: 'Good'
-        },
-        {
-          type: 'TextBlock',
-          text: 'Your timesheet entry has been successfully saved to Odoo.',
-          wrap: true,
-          spacing: 'Small'
+          type: 'Container',
+          items: [
+            {
+              type: 'TextBlock',
+              text: '✓ Timesheet Saved',
+              weight: 'Bolder',
+              size: 'Large',
+              color: 'Good'
+            },
+            {
+              type: 'TextBlock',
+              text: 'Your timesheet entry has been successfully saved to Odoo.',
+              wrap: true,
+              spacing: 'Small',
+              isSubtle: true
+            }
+          ]
         },
         {
           type: 'FactSet',
@@ -303,20 +332,26 @@ export class TimesheetCardGenerator {
     const card = {
       type: 'AdaptiveCard',
       $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
-      version: '1.2',
+      version: '1.5',
       body: [
         {
-          type: 'TextBlock',
-          text: 'Timesheet Cancelled',
-          weight: 'Bolder',
-          size: 'Medium',
-          color: 'Warning'
-        },
-        {
-          type: 'TextBlock',
-          text: 'No timesheet entry was created.',
-          wrap: true,
-          spacing: 'Small'
+          type: 'Container',
+          items: [
+            {
+              type: 'TextBlock',
+              text: 'Timesheet Cancelled',
+              weight: 'Bolder',
+              size: 'Medium',
+              color: 'Warning'
+            },
+            {
+              type: 'TextBlock',
+              text: 'No timesheet entry was created.',
+              wrap: true,
+              spacing: 'Small',
+              isSubtle: true
+            }
+          ]
         }
       ]
     };
