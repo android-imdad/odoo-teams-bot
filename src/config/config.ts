@@ -9,6 +9,7 @@ interface Config {
     appPassword: string;
     port: number;
     publicUrl: string;
+    tenantId?: string; // Required for single-tenant bots
   };
   odoo: OdooConfig;
   oauth?: OAuthConfig;
@@ -170,7 +171,8 @@ export const config: Config = {
     appId: process.env.BOT_ID!,
     appPassword: useManagedIdentity ? '' : (process.env.BOT_PASSWORD || ''),
     port: parseInt(process.env.PORT || '3978', 10),
-    publicUrl: process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || '3978'}`
+    publicUrl: process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || '3978'}`,
+    tenantId: process.env.BOT_TENANT_ID
   },
   odoo: {
     url: process.env.ODOO_URL!,

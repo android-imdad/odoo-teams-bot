@@ -91,11 +91,15 @@ const adapterSettings = config.managedIdentity.enabled
       appId: config.bot.appId,
       // For managed identity, we don't need appPassword
       // The adapter will use the app ID to authenticate incoming requests
-      appPassword: ''
+      appPassword: '',
+      // For single-tenant bots, set the tenant ID for token validation
+      ...(config.bot.tenantId && { channelAuthTenant: config.bot.tenantId })
     }
   : {
       appId: config.bot.appId || '',
-      appPassword: config.bot.appPassword || ''
+      appPassword: config.bot.appPassword || '',
+      // For single-tenant bots, set the tenant ID for token validation
+      ...(config.bot.tenantId && { channelAuthTenant: config.bot.tenantId })
     };
 
 const adapter = new BotFrameworkAdapter(adapterSettings);
@@ -105,6 +109,14 @@ if (config.managedIdentity.enabled) {
   logger.info('Managed identity authentication enabled', {
     appId: config.managedIdentity.appId,
     clientId: config.managedIdentity.clientId
+  });
+}
+
+// Log single-tenant configuration
+if (config.bot.tenantId) {
+  logger.info('Single-tenant bot configured', {
+    tenantId: config.bot.tenantId,
+    appId: config.bot.appId
   });
 }
 
