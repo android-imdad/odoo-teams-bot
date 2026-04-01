@@ -5,6 +5,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { logger } from '../config/logger';
 import { config } from '../config/config';
 
@@ -62,6 +63,7 @@ export class AuditService {
   private batchSize: number = 100;
   private batch: AuditEvent[] = [];
   private batchTimeout?: NodeJS.Timeout;
+  private lastHash: string = '0';
 
   constructor(options: {
     auditLogPath?: string;
@@ -96,14 +98,18 @@ export class AuditService {
   }
 
   /**
-   * Write an audit event to the log
+   * Write an audit event to the log.
+   * R-2: Each event includes a hash of the previous event for tamper detection.
    */
   private writeEvent(event: AuditEvent): void {
     if (!this.isEnabled) return;
 
     try {
-      const logLine = JSON.stringify(event) + '\n';
-      fs.appendFileSync(this.auditLogPath, logLine, 'utf8');
+      (event as any).prevHash = this.lastHash;
+      const logLine = JSON.stringify(event);
+      this.lastHash = crypto.createHash('sha256').update(logLine).digest('hex');
+      (event as any).hash = this.lastHash;
+      fs.appendFileSync(this.auditLogPath, JSON.stringify(event) + '\n', 'utf8');
     } catch (error) {
       logger.error('Failed to write audit event', { error, eventId: event.id });
     }

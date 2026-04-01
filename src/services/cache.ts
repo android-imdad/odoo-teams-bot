@@ -3,8 +3,24 @@ import { logger } from '../config/logger';
 
 export class Cache<T> {
   private cache: Map<string, CacheEntry<T>> = new Map();
+  private maxSize: number;
+
+  constructor(maxSize: number = 10000) {
+    this.maxSize = maxSize;
+  }
 
   set(key: string, data: T, ttl: number): void {
+    // D-2: Evict oldest entry if at capacity (LRU approximation)
+    if (this.cache.size >= this.maxSize && !this.cache.has(key)) {
+      const oldestKey = this.cache.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.cache.delete(oldestKey);
+        logger.debug(`Cache evicted oldest entry due to size limit (${this.maxSize})`);
+      }
+    }
+
+    // Delete and re-insert to move to end of Map insertion order
+    this.cache.delete(key);
     this.cache.set(key, {
       data,
       timestamp: Date.now(),
@@ -27,6 +43,10 @@ export class Cache<T> {
       this.cache.delete(key);
       return null;
     }
+
+    // Move to end of Map for LRU ordering
+    this.cache.delete(key);
+    this.cache.set(key, entry);
 
     logger.debug(`Cache hit: ${key}`);
     return entry.data;

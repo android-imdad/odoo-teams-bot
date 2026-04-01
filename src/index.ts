@@ -9,6 +9,7 @@ import { ApiKeyAuthService } from './services/apiKeyAuth';
 import { TokenRefreshJob } from './services/tokenRefresh';
 import { registerOAuthRoutes } from './routes/oauth';
 import { OdooService } from './services/odoo';
+import { createRateLimiter, RateLimitPresets } from './middleware/rateLimit';
 import path from 'path';
 import fs from 'fs';
 
@@ -36,7 +37,22 @@ async function initializeAuth(): Promise<void> {
         logger.info('Created data directory', { path: dbDir });
       }
 
-      tokenStorage = new TokenStorageService({ dbPath, encryptionKey: config.tokenStorage?.encryptionKey || 'default-key-32-chars-long!!!!!' });
+      const encryptionKey = config.tokenStorage?.encryptionKey;
+      if (!encryptionKey || encryptionKey.length < 16) {
+        throw new Error(
+          'TOKEN_ENCRYPTION_KEY is required for api_key and oauth modes and must be at least 16 characters. ' +
+          'Generate a secure key with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
+        );
+      }
+      // Reject well-known default/placeholder keys
+      const insecureKeys = ['default-key-32-chars-long!!!!!', 'YOUR_API_KEY_HERE', 'changeme', 'password'];
+      if (insecureKeys.some(k => encryptionKey.includes(k))) {
+        throw new Error(
+          'TOKEN_ENCRYPTION_KEY is set to an insecure default value. ' +
+          'Generate a secure key with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
+        );
+      }
+      tokenStorage = new TokenStorageService({ dbPath, encryptionKey });
       await tokenStorage.initialize();
       logger.info('Token storage initialized');
     } catch (error) {
@@ -73,6 +89,11 @@ async function initializeAuth(): Promise<void> {
 
   if (AUTH_MODE === 'admin_proxy') {
     logger.info('Admin proxy mode enabled - timesheets will be logged via admin account with user email lookup');
+    logger.warn(
+      'SECURITY: Ensure the admin proxy service account has minimal Odoo permissions. ' +
+      'Required: READ project.project, project.task, res.users; CREATE account.analytic.line, project.task. ' +
+      'See src/services/odoo.ts for full documentation (E-1).'
+    );
   }
 
   if (AUTH_MODE === 'service_account') {
@@ -164,20 +185,29 @@ server.get('/health', (_req, res, next) => {
   next();
 });
 
+// Rate limiting middleware for bot messages endpoint
+const botMessageRateLimiter = createRateLimiter(RateLimitPresets.BOT_MESSAGES);
+
+// Stricter rate limiter for OAuth endpoints
+const oauthRateLimiter = createRateLimiter({
+  requests: 10,
+  windowMs: 60000, // 10 requests per minute
+  skip: (req) => req.path() === '/health'
+});
+
 // Bot endpoint (registered after bot is created)
 let botEndpointRegistered = false;
 
 function registerBotEndpoint(): void {
   if (botEndpointRegistered) return;
 
-  server.post('/api/messages', async (req, res) => {
-    // Log incoming requests for debugging
+  server.post('/api/messages', botMessageRateLimiter, async (req, res) => {
+    // Log incoming requests for debugging (redact body for security - I-1)
     logger.info('Incoming bot request', {
       method: req.method,
       url: req.url,
       contentType: req.header('content-type'),
-      authHeader: req.header('authorization') ? 'present' : 'missing',
-      body: req.body
+      authHeader: req.header('authorization') ? 'present' : 'missing'
     });
 
     await adapter.process(req, res, (context) => bot.run(context));
@@ -206,7 +236,7 @@ async function startServer(): Promise<void> {
 
     // Register OAuth routes if enabled
     if (oauthService) {
-      registerOAuthRoutes(server, oauthService, { adapter, bot });
+      registerOAuthRoutes(server, oauthService, { adapter, bot }, oauthRateLimiter);
     }
 
     // Start HTTP server

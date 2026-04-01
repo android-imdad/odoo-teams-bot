@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 import { logger } from '../config/logger';
 import { TokenStorageService } from './tokenStorage';
 import {
@@ -20,17 +21,23 @@ export class OAuthService {
   }
 
   /**
-   * Generate OAuth authorization URL for user
+   * Generate OAuth authorization URL for user.
+   * Uses proper PKCE with a separate code_verifier (RFC 7636).
    */
   generateAuthUrl(teamsUserId: string, conversationReference: any): string {
     const state = uuidv4();
 
-    // Store pending state for validation on callback
+    // Generate a cryptographically random code_verifier (43-128 chars per RFC 7636)
+    // Using 32 random bytes → 43 base64url characters
+    const codeVerifier = crypto.randomBytes(32).toString('base64url');
+
+    // Store pending state with code_verifier for validation on callback
     const pendingState: PendingAuthState = {
       state,
       teamsUserId,
       conversationReference: JSON.stringify(conversationReference),
-      expiresAt: Math.floor(Date.now() / 1000) + 600 // 10 minutes expiry
+      expiresAt: Math.floor(Date.now() / 1000) + 600, // 10 minutes expiry
+      codeVerifier
     };
 
     // Store synchronously - caller should handle errors
@@ -39,14 +46,14 @@ export class OAuthService {
     });
 
     // Build authorization URL with PKCE
+    // Only the S256 hash of the code_verifier is sent; the verifier stays server-side
     const params = new URLSearchParams({
       client_id: this.config.clientId,
       redirect_uri: this.config.redirectUri,
       response_type: 'code',
       state: state,
       scope: this.config.scope,
-      // PKCE parameters for security
-      code_challenge: this.generateCodeChallenge(state),
+      code_challenge: this.generateCodeChallenge(codeVerifier),
       code_challenge_method: 'S256'
     });
 
@@ -75,8 +82,8 @@ export class OAuthService {
       state: state.substring(0, 8) + '...'
     });
 
-    // Exchange code for tokens
-    const tokens = await this.exchangeCodeForTokens(code, state);
+    // Exchange code for tokens using the stored code_verifier (PKCE)
+    const tokens = await this.exchangeCodeForTokens(code, pendingState.codeVerifier || state);
 
     // Fetch user info from Odoo to get user ID
     const userInfo = await this.fetchUserInfo(tokens.accessToken);
@@ -182,17 +189,17 @@ export class OAuthService {
   }
 
   /**
-   * Exchange authorization code for tokens
+   * Exchange authorization code for tokens using PKCE code_verifier
    */
-  private async exchangeCodeForTokens(code: string, state: string): Promise<OAuthTokens> {
+  private async exchangeCodeForTokens(code: string, codeVerifier: string): Promise<OAuthTokens> {
     const params = new URLSearchParams({
       grant_type: 'authorization_code',
       code: code,
       redirect_uri: this.config.redirectUri,
       client_id: this.config.clientId,
       client_secret: this.config.clientSecret,
-      // PKCE verifier
-      code_verifier: state
+      // PKCE: send the original code_verifier so the server can verify it matches the challenge
+      code_verifier: codeVerifier
     });
 
     const response = await fetch(this.config.tokenUrl, {
@@ -353,15 +360,12 @@ export class OAuthService {
   }
 
   /**
-   * Generate PKCE code challenge from code verifier
+   * Generate PKCE code challenge from code verifier (S256 method per RFC 7636)
    */
   private generateCodeChallenge(verifier: string): string {
-    // Simple S256 implementation
-    const crypto = require('crypto');
     return crypto
       .createHash('sha256')
       .update(verifier)
-      .digest('base64url')
-      .replace(/=/g, '');
+      .digest('base64url');
   }
 }

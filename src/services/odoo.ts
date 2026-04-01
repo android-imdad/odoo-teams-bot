@@ -12,6 +12,30 @@ import { OAuthService } from './oauth';
 import { ApiKeyAuthService } from './apiKeyAuth';
 import { UserMappingService, OdooUserInfo } from './userMapping';
 
+/**
+ * OdooService - XML-RPC client for Odoo ERP integration.
+ *
+ * ADMIN PROXY MODE - MINIMUM REQUIRED PERMISSIONS (E-1):
+ * The admin service account used for admin_proxy mode should have ONLY these permissions:
+ *
+ * READ access:
+ *   - project.project (list/read active projects)
+ *   - project.task (list/read active tasks)
+ *   - res.users (look up users by email for timesheet attribution)
+ *
+ * CREATE access:
+ *   - account.analytic.line (create timesheet entries on behalf of users)
+ *   - project.task (create new tasks when users request them)
+ *
+ * The service account should NOT have:
+ *   - DELETE access to any model
+ *   - WRITE access to res.users, project.project, or other sensitive models
+ *   - Administration/Settings access
+ *   - Access to accounting, HR, or other unrelated modules
+ *
+ * Recommended: Create a dedicated Odoo user with a custom access group
+ * containing only the permissions listed above.
+ */
 class OdooService {
   private config: OdooConfig;
   private uid: number | null = null;
@@ -517,7 +541,7 @@ class OdooService {
    * Looks up user by email and logs timesheet on their behalf
    */
   private async logTimeAsAdminProxy(entry: TimesheetEntry, userEmail: string): Promise<number> {
-    logger.info('Logging timesheet via admin proxy', { userEmail, entry });
+    logger.info('Logging timesheet via admin proxy', { projectId: entry.project_id, hours: entry.hours });
 
     // Look up the Odoo user by email
     const odooUser = await this.lookupUserByEmail(userEmail);
@@ -544,7 +568,14 @@ class OdooService {
       targetUserName: odooUser.name
     });
 
-    return this.createTimesheetEntry(entry, userId, auth);
+    // R-1: Include Teams email in description for audit trail
+    // Odoo's create_uid will show the admin, so we embed the actual user info
+    const attributedEntry = {
+      ...entry,
+      description: `[${userEmail}] ${entry.description}`
+    };
+
+    return this.createTimesheetEntry(attributedEntry, userId, auth);
   }
 
   /**

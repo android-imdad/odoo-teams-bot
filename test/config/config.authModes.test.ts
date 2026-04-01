@@ -114,6 +114,19 @@ describe('Config Validation - Auth Modes', () => {
           process.env.ODOO_PASSWORD = 'admin_pass';
         }
 
+        // api_key and oauth modes require TOKEN_ENCRYPTION_KEY (S-4 security fix)
+        if (mode === 'api_key' || mode === 'oauth') {
+          process.env.TOKEN_ENCRYPTION_KEY = 'a-secure-test-encryption-key-1234567890';
+        }
+
+        // oauth mode also requires OAuth config
+        if (mode === 'oauth') {
+          process.env.OAUTH_ENABLED = 'true';
+          process.env.ODOO_OAUTH_CLIENT_ID = 'test-client-id';
+          process.env.ODOO_OAUTH_CLIENT_SECRET = 'test-client-secret';
+          process.env.ODOO_OAUTH_REDIRECT_URI = 'https://bot.example.com/auth/oauth/callback';
+        }
+
         expect(() => {
           require('../../src/config/config');
         }).not.toThrow();

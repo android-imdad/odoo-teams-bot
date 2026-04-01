@@ -85,11 +85,12 @@ class ConfigValidator {
       }
     }
 
-    // Validate that service account mode is only used in development
+    // E-2: Only allow service_account in development or test environments
     if (authMode === 'service_account') {
-      if (process.env.NODE_ENV === 'production') {
+      const env = process.env.NODE_ENV || 'development';
+      if (env !== 'development' && env !== 'test') {
         throw new Error(
-          'Service account mode (AUTH_MODE=service_account) is not allowed in production. ' +
+          `Service account mode (AUTH_MODE=service_account) is only allowed in development/test environments (current: ${env}). ` +
           'Please use AUTH_MODE=api_key, AUTH_MODE=oauth, or AUTH_MODE=admin_proxy for per-user authentication.'
         );
       }
@@ -104,6 +105,25 @@ class ConfigValidator {
         throw new Error(
           'Admin proxy mode (AUTH_MODE=admin_proxy) requires ODOO_USERNAME and ODOO_PASSWORD ' +
           'for the admin service account that will log timesheets on behalf of users.'
+        );
+      }
+    }
+
+    // Require TOKEN_ENCRYPTION_KEY for api_key and oauth modes
+    if (authMode === 'api_key' || authMode === 'oauth') {
+      const encryptionKey = process.env.TOKEN_ENCRYPTION_KEY || '';
+      if (!encryptionKey || encryptionKey.length < 16) {
+        throw new Error(
+          `TOKEN_ENCRYPTION_KEY is required for ${authMode} mode and must be at least 16 characters long. ` +
+          'Generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
+        );
+      }
+      // Reject well-known default/placeholder keys
+      const insecureKeys = ['default-key-32-chars-long!!!!!', 'YOUR_API_KEY_HERE', 'changeme', 'password'];
+      if (insecureKeys.some(k => encryptionKey.includes(k))) {
+        throw new Error(
+          'TOKEN_ENCRYPTION_KEY is set to an insecure default value. ' +
+          'Generate a secure key with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
         );
       }
     }
@@ -124,14 +144,6 @@ class ConfigValidator {
       if (oauthMissing.length > 0) {
         throw new Error(
           `OAuth enabled but missing required variables: ${oauthMissing.join(', ')}`
-        );
-      }
-
-      // Validate encryption key length
-      const encryptionKey = process.env.TOKEN_ENCRYPTION_KEY || '';
-      if (encryptionKey.length < 16) {
-        throw new Error(
-          'TOKEN_ENCRYPTION_KEY must be at least 16 characters long'
         );
       }
     }
@@ -155,8 +167,9 @@ const oauthConfig: OAuthConfig | undefined = oauthEnabled
     }
   : undefined;
 
-// Build token storage config if OAuth enabled
-const tokenStorageConfig: TokenStorageConfig | undefined = oauthEnabled
+// Build token storage config if OAuth or API Key mode is enabled
+const authMode = process.env.AUTH_MODE || 'api_key';
+const tokenStorageConfig: TokenStorageConfig | undefined = (oauthEnabled || authMode === 'api_key')
   ? {
       dbPath: process.env.TOKEN_DB_PATH || './data/tokens.db',
       encryptionKey: process.env.TOKEN_ENCRYPTION_KEY!

@@ -10,6 +10,7 @@ import { withRetry, RetryPresets } from '../utils/retry';
 import { OdooService } from './odoo';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 
 export interface ResilienceConfig {
   /** Enable offline mode when Odoo is unavailable */
@@ -65,8 +66,23 @@ class ResilienceService {
       }
 
       if (fs.existsSync(this.config.offlineQueuePath)) {
-        const data = fs.readFileSync(this.config.offlineQueuePath, 'utf8');
-        this.offlineQueue = JSON.parse(data);
+        const raw = fs.readFileSync(this.config.offlineQueuePath, 'utf8');
+        const parsed = JSON.parse(raw);
+
+        // T-3: Verify HMAC integrity if present
+        if (parsed.hmac && parsed.data) {
+          const data = JSON.stringify(parsed.data, null, 2);
+          const expectedHmac = crypto.createHmac('sha256', this.getHmacKey()).update(data).digest('hex');
+          if (parsed.hmac !== expectedHmac) {
+            logger.error('Offline queue integrity check failed - queue may have been tampered with');
+            this.offlineQueue = [];
+            return;
+          }
+          this.offlineQueue = parsed.data;
+        } else {
+          // Legacy format without HMAC - migrate on next save
+          this.offlineQueue = Array.isArray(parsed) ? parsed : [];
+        }
         logger.info('Offline queue loaded', { size: this.offlineQueue.length });
       }
     } catch (error) {
@@ -76,18 +92,21 @@ class ResilienceService {
   }
 
   /**
-   * Save offline queue to disk
+   * Save offline queue to disk with HMAC integrity check (T-3)
    */
   private saveOfflineQueue(): void {
     try {
-      fs.writeFileSync(
-        this.config.offlineQueuePath,
-        JSON.stringify(this.offlineQueue, null, 2),
-        'utf8'
-      );
+      const data = JSON.stringify(this.offlineQueue, null, 2);
+      const hmac = crypto.createHmac('sha256', this.getHmacKey()).update(data).digest('hex');
+      const payload = JSON.stringify({ data: this.offlineQueue, hmac });
+      fs.writeFileSync(this.config.offlineQueuePath, payload, 'utf8');
     } catch (error) {
       logger.error('Failed to save offline queue', { error });
     }
+  }
+
+  private getHmacKey(): string {
+    return process.env.TOKEN_ENCRYPTION_KEY || process.env.BOT_PASSWORD || 'offline-queue-key';
   }
 
   /**

@@ -28,6 +28,7 @@ export interface PendingAuthState {
   teamsUserId: string;
   conversationReference: string; // JSON stringified
   expiresAt: number; // Unix timestamp in seconds
+  codeVerifier?: string; // PKCE code verifier (43-128 chars per RFC 7636)
 }
 
 export interface OAuthConfig {

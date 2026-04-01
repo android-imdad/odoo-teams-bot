@@ -15,14 +15,8 @@ export class TokenStorageService {
 
   constructor(config: TokenStorageConfig) {
     this.config = config;
-    // Derive a 32-byte key from the provided encryption key using PBKDF2
-    this.encryptionKey = crypto.pbkdf2Sync(
-      config.encryptionKey,
-      'odoo-bot-salt',
-      100000,
-      32,
-      'sha256'
-    );
+    // Salt will be loaded/generated during initialize()
+    this.encryptionKey = Buffer.alloc(32);
   }
 
   /**
@@ -36,6 +30,17 @@ export class TokenStorageService {
       });
 
       await this.initializeDatabase();
+
+      // I-4: Use unique salt per deployment, stored in DB
+      const salt = await this.getOrCreateSalt();
+      this.encryptionKey = crypto.pbkdf2Sync(
+        this.config.encryptionKey,
+        salt,
+        100000,
+        32,
+        'sha256'
+      );
+
       logger.info('TokenStorageService initialized', { dbPath: this.config.dbPath });
     } catch (error) {
       logger.error('Failed to initialize TokenStorageService', { error });
@@ -84,6 +89,7 @@ export class TokenStorageService {
         teams_user_id TEXT NOT NULL,
         conversation_reference TEXT NOT NULL,
         expires_at INTEGER NOT NULL,
+        code_verifier TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -99,6 +105,38 @@ export class TokenStorageService {
     `);
 
     logger.debug('Database tables initialized');
+  }
+
+  /**
+   * Get or create a unique PBKDF2 salt for this deployment (I-4).
+   * Stored in a dedicated table so it persists across restarts.
+   */
+  private async getOrCreateSalt(): Promise<string> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    await this.db.exec(`
+      CREATE TABLE IF NOT EXISTS deployment_config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
+    `);
+
+    const row = await this.db.get(
+      "SELECT value FROM deployment_config WHERE key = 'pbkdf2_salt'"
+    );
+
+    if (row) {
+      return row.value;
+    }
+
+    const salt = crypto.randomBytes(32).toString('hex');
+    await this.db.run(
+      "INSERT INTO deployment_config (key, value) VALUES ('pbkdf2_salt', ?)",
+      [salt]
+    );
+
+    logger.info('Generated new PBKDF2 salt for this deployment');
+    return salt;
   }
 
   /**
@@ -218,10 +256,10 @@ export class TokenStorageService {
     try {
       await this.db.run(
         `
-        INSERT INTO pending_auth_states (state, teams_user_id, conversation_reference, expires_at)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO pending_auth_states (state, teams_user_id, conversation_reference, expires_at, code_verifier)
+        VALUES (?, ?, ?, ?, ?)
         `,
-        [state.state, state.teamsUserId, state.conversationReference, state.expiresAt]
+        [state.state, state.teamsUserId, state.conversationReference, state.expiresAt, state.codeVerifier || null]
       );
 
       logger.debug('Pending state saved', { state: state.state });
@@ -264,7 +302,8 @@ export class TokenStorageService {
         state: row.state,
         teamsUserId: row.teams_user_id,
         conversationReference: row.conversation_reference,
-        expiresAt: row.expires_at
+        expiresAt: row.expires_at,
+        codeVerifier: row.code_verifier || undefined
       };
     } catch (error) {
       logger.error('Failed to get pending state', { state, error });

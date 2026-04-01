@@ -1,11 +1,67 @@
 import { Server, Request, Response, Next } from 'restify';
+import crypto from 'crypto';
 import { BotFrameworkAdapter } from 'botbuilder';
 import { OAuthService } from '../services/oauth';
 import { logger } from '../config/logger';
+import { escapeHTML } from '../utils/sanitization';
 
 export interface OAuthRoutesConfig {
   adapter: BotFrameworkAdapter;
   bot: any; // TimesheetBot instance
+}
+
+/**
+ * Validate an HMAC signature for internal bot-to-route requests.
+ * Prevents unauthenticated access to OAuth management endpoints (S-2).
+ * The signature is: HMAC-SHA256(userId + timestamp, BOT_PASSWORD || BOT_ID).
+ * Requests older than 5 minutes are rejected.
+ */
+function validateInternalSignature(userId: string, signature?: string, timestamp?: string): boolean {
+  if (!signature || !timestamp) {
+    return false;
+  }
+
+  // Reject requests older than 5 minutes
+  const requestTime = parseInt(timestamp, 10);
+  if (isNaN(requestTime) || Math.abs(Date.now() - requestTime) > 5 * 60 * 1000) {
+    return false;
+  }
+
+  const secret = process.env.BOT_PASSWORD || process.env.BOT_ID || '';
+  if (!secret) {
+    logger.warn('Cannot validate signature: no BOT_PASSWORD or BOT_ID set');
+    return false;
+  }
+
+  const expectedSignature = crypto
+    .createHmac('sha256', secret)
+    .update(`${userId}${timestamp}`)
+    .digest('hex');
+
+  // Use timing-safe comparison to prevent timing attacks
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(signature, 'hex'),
+      Buffer.from(expectedSignature, 'hex')
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Generate an HMAC signature for internal requests (for use by the bot).
+ */
+export function generateInternalSignature(userId: string): { signature: string; timestamp: string } {
+  const timestamp = Date.now().toString();
+  const secret = process.env.BOT_PASSWORD || process.env.BOT_ID || '';
+
+  const signature = crypto
+    .createHmac('sha256', secret)
+    .update(`${userId}${timestamp}`)
+    .digest('hex');
+
+  return { signature, timestamp };
 }
 
 // Helper to handle async route handlers with restify
@@ -18,11 +74,15 @@ function asyncHandler(fn: (req: Request, res: Response, next: Next) => Promise<v
 export function registerOAuthRoutes(
   server: Server,
   oauthService: OAuthService,
-  _config: OAuthRoutesConfig
+  _config: OAuthRoutesConfig,
+  rateLimiter?: (req: Request, res: Response, next: Next) => void
 ): void {
 
+  // Apply rate limiter to all OAuth routes if provided
+  const middleware = rateLimiter ? [rateLimiter] : [];
+
   // OAuth start endpoint - initiates the OAuth flow
-  server.get('/auth/oauth/start', asyncHandler(async (req: Request, res: Response, next: Next) => {
+  server.get('/auth/oauth/start', ...middleware, asyncHandler(async (req: Request, res: Response, next: Next) => {
     try {
       const { userId, conversationRef } = req.query;
 
@@ -56,7 +116,7 @@ export function registerOAuthRoutes(
   }));
 
   // OAuth callback endpoint - called by OAuth provider after user authorization
-  server.get('/auth/oauth/callback', asyncHandler(async (req: Request, res: Response, next: Next) => {
+  server.get('/auth/oauth/callback', ...middleware, asyncHandler(async (req: Request, res: Response, next: Next) => {
     const { code, state, error: oauthError, error_description } = req.query;
 
     // Handle OAuth errors (user denied, etc.)
@@ -68,7 +128,7 @@ export function registerOAuthRoutes(
 
       res.send(400, {
         error: 'OAuth authorization failed',
-        details: error_description || oauthError
+        details: escapeHTML(String(error_description || oauthError || 'Unknown error'))
       });
       return next();
     }
@@ -183,7 +243,7 @@ export function registerOAuthRoutes(
     <p>Your Odoo account has been successfully connected to Microsoft Teams.</p>
     <div class="user-info">
       <strong>Connected as:</strong><br>
-      ${session.odooUsername} (ID: ${session.odooUserId})
+      ${escapeHTML(session.odooUsername)} (ID: ${session.odooUserId})
     </div>
     <p>You can now close this window and return to Teams to start logging timesheets.</p>
     <button class="close-btn" onclick="window.close()">Close Window</button>
@@ -286,7 +346,7 @@ export function registerOAuthRoutes(
     <h1>Authentication Failed</h1>
     <p>We couldn't connect your Odoo account. Please try again.</p>
     <div class="error-details">
-      ${error instanceof Error ? error.message : 'Unknown error'}
+      Authentication could not be completed. Please return to Teams and try again.
     </div>
     <a href="javascript:history.back()" class="retry-btn">Try Again</a>
   </div>
@@ -299,13 +359,21 @@ export function registerOAuthRoutes(
     }
   }));
 
-  // Logout endpoint
-  server.post('/auth/oauth/revoke', asyncHandler(async (req: Request, res: Response, next: Next) => {
+  // Logout endpoint - requires HMAC signature for authentication (S-2)
+  // The bot generates signed requests internally; external callers cannot forge them
+  server.post('/auth/oauth/revoke', ...middleware, asyncHandler(async (req: Request, res: Response, next: Next) => {
     try {
-      const { userId } = req.body || {};
+      const { userId, signature, timestamp } = req.body || {};
 
       if (!userId) {
         res.send(400, { error: 'Missing required parameter: userId' });
+        return next();
+      }
+
+      // Validate HMAC signature to prove the request came from the bot
+      if (!validateInternalSignature(userId, signature, timestamp)) {
+        logger.warn('Unauthorized revoke attempt', { userId });
+        res.send(403, { error: 'Forbidden: invalid or missing authentication' });
         return next();
       }
 
@@ -323,13 +391,20 @@ export function registerOAuthRoutes(
     }
   }));
 
-  // Status endpoint - check if user is authenticated
-  server.get('/auth/oauth/status', asyncHandler(async (req: Request, res: Response, next: Next) => {
+  // Status endpoint - requires HMAC signature for authentication (S-2)
+  server.get('/auth/oauth/status', ...middleware, asyncHandler(async (req: Request, res: Response, next: Next) => {
     try {
-      const { userId } = req.query;
+      const { userId, signature, timestamp } = req.query;
 
       if (!userId || typeof userId !== 'string') {
         res.send(400, { error: 'Missing required parameter: userId' });
+        return next();
+      }
+
+      // Validate HMAC signature to prove the request came from the bot
+      if (!validateInternalSignature(userId as string, signature as string, timestamp as string)) {
+        logger.warn('Unauthorized status check attempt', { userId });
+        res.send(403, { error: 'Forbidden: invalid or missing authentication' });
         return next();
       }
 

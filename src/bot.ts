@@ -14,6 +14,15 @@ import { TimesheetCardData } from './types/bot.types';
 import { TimesheetEntry, AuthRequiredError } from './types';
 import { OAuthService } from './services/oauth';
 import { ApiKeyAuthService } from './services/apiKeyAuth';
+import { sanitizeTimesheetInput } from './utils/sanitization';
+import { Validator } from './utils/validation';
+import crypto from 'crypto';
+
+/** Hash an email for safe logging (I-1) */
+function hashEmail(email: string | undefined): string | undefined {
+  if (!email) return undefined;
+  return crypto.createHash('sha256').update(email.toLowerCase()).digest('hex').substring(0, 12) + '@***';
+}
 
 export class TimesheetBot extends TeamsActivityHandler {
   private oauthService?: OAuthService;
@@ -69,7 +78,7 @@ export class TimesheetBot extends TeamsActivityHandler {
               `You're all set! Send a message like "Log 2 hours on Project X" to get started.` +
               (teamsEmail ? `\n\nYour timesheets will be logged for: ${teamsEmail}` : '')
             );
-            logger.info('Welcome message sent (admin proxy mode)', { memberId: teamsUserId, email: teamsEmail });
+            logger.info('Welcome message sent (admin proxy mode)', { memberId: teamsUserId, emailHash: hashEmail(teamsEmail) });
             continue;
           }
 
@@ -141,10 +150,10 @@ export class TimesheetBot extends TeamsActivityHandler {
 
       logger.info('Processing message', {
         userId: teamsUserId,
-        email: teamsEmail,
-        text: userText,
+        emailHash: hashEmail(teamsEmail),
         adminProxyMode: this.isAdminProxyMode
       });
+      logger.debug('Message content', { text: userText });
 
       // Handle special commands
       const lowerText = userText.toLowerCase();
@@ -291,7 +300,7 @@ export class TimesheetBot extends TeamsActivityHandler {
         attachments: [confirmCard]
       });
 
-      logger.info('Confirmation card sent', { cardData });
+      logger.info('Confirmation card sent', { projectId: cardData.project_id, hours: cardData.hours, date: cardData.date });
 
     } catch (error) {
       logger.error('Error handling message', { error });
@@ -307,10 +316,13 @@ export class TimesheetBot extends TeamsActivityHandler {
    */
   private async extractTeamsEmail(context: TurnContext, teamsUserId: string): Promise<string | undefined> {
     try {
-      // DEV/TEST MODE: Override email from environment variable
-      // Use this for testing with Bot Framework Emulator
+      // DEV/TEST MODE: Override email from environment variable (S-3: blocked in production)
       if (process.env.TEST_USER_EMAIL) {
-        return process.env.TEST_USER_EMAIL.toLowerCase().trim();
+        if (process.env.NODE_ENV === 'production') {
+          logger.error('TEST_USER_EMAIL is set in production - ignoring for security');
+        } else {
+          return process.env.TEST_USER_EMAIL.toLowerCase().trim();
+        }
       }
 
       // Method 1: Try to get from activity.from (most common in Teams)
@@ -359,8 +371,7 @@ export class TimesheetBot extends TeamsActivityHandler {
       }
 
       logger.warn('Could not extract email from Teams context', {
-        from: context.activity.from,
-        channelData: context.activity.channelData
+        fromId: context.activity.from?.id
       });
 
       return undefined;
@@ -631,7 +642,34 @@ export class TimesheetBot extends TeamsActivityHandler {
     const teamsUserId = context.activity.from.id;
 
     try {
-      logger.info('Saving timesheet to Odoo', { data, teamsUserId, teamsEmail });
+      // T-2: Validate and sanitize Adaptive Card action data
+      const validation = Validator.validateTimesheetData(data);
+      if (!validation.valid) {
+        logger.warn('Invalid timesheet action data', { errors: validation.errors, teamsUserId });
+        const errorCard = TimesheetCardGenerator.createErrorCard(
+          `Invalid timesheet data: ${validation.errors.join(', ')}`
+        );
+        await context.sendActivity({ attachments: [errorCard] });
+        return;
+      }
+
+      const sanitized = sanitizeTimesheetInput({
+        project_id: data.project_id,
+        project_name: data.project_name,
+        hours: data.hours,
+        date: data.date,
+        description: data.description
+      });
+      data = {
+        ...data,
+        project_id: sanitized.project_id!,
+        project_name: sanitized.project_name || data.project_name,
+        hours: sanitized.hours!,
+        date: sanitized.date || data.date,
+        description: sanitized.description || data.description
+      };
+
+      logger.info('Saving timesheet to Odoo', { projectId: data.project_id, hours: data.hours, date: data.date, teamsUserId, emailHash: hashEmail(teamsEmail) });
 
       let taskId = data.task_id;
       let taskName = data.task_name;
@@ -691,7 +729,7 @@ export class TimesheetBot extends TeamsActivityHandler {
       logger.info('Timesheet saved successfully', {
         timesheetId,
         userId: teamsUserId,
-        email: teamsEmail
+        emailHash: hashEmail(teamsEmail)
       });
 
       // Update data with the new task info for the confirmed card
@@ -712,7 +750,7 @@ export class TimesheetBot extends TeamsActivityHandler {
       logger.info('Confirmation card updated');
 
     } catch (error) {
-      logger.error('Failed to save timesheet', { error, data, teamsUserId, teamsEmail });
+      logger.error('Failed to save timesheet', { error, projectId: data.project_id, teamsUserId, emailHash: hashEmail(teamsEmail) });
 
       // Handle authentication errors specifically (not applicable for admin proxy)
       if (!this.isAdminProxyMode && error instanceof AuthRequiredError) {

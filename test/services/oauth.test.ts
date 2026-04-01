@@ -438,7 +438,7 @@ describe('OAuthService', () => {
       expect(authUrl).toContain('code_challenge_method=S256');
     });
 
-    it('should use state as code_verifier in token exchange', async () => {
+    it('should use a separate code_verifier (not state) in token exchange', async () => {
       const userId = 'teams-user-123';
       const authUrl = service.generateAuthUrl(userId, {});
       const state = new URL(authUrl).searchParams.get('state')!;
@@ -475,7 +475,13 @@ describe('OAuthService', () => {
 
       await service.handleCallback('code', state);
 
-      expect(capturedBody).toContain(`code_verifier=${state}`);
+      // code_verifier should be present but should NOT be the state value
+      expect(capturedBody).toContain('code_verifier=');
+      expect(capturedBody).not.toContain(`code_verifier=${state}`);
+      // Verify code_verifier is a proper length (base64url of 32 bytes = 43 chars)
+      const params = new URLSearchParams(capturedBody!);
+      const verifier = params.get('code_verifier')!;
+      expect(verifier.length).toBeGreaterThanOrEqual(43);
     });
   });
 });

@@ -4,9 +4,29 @@
 
 import { Server } from 'restify';
 import { OAuthService } from '../../src/services/oauth';
-import { registerOAuthRoutes } from '../../src/routes/oauth';
+import { registerOAuthRoutes, generateInternalSignature } from '../../src/routes/oauth';
 import { BotFrameworkAdapter } from 'botbuilder';
 import { TimesheetBot } from '../../src/bot';
+
+jest.mock('../../src/config/logger', () => ({
+  logger: {
+    info: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+    warn: jest.fn()
+  }
+}));
+
+// Set up BOT_ID for HMAC signature validation in tests
+process.env.BOT_ID = 'test-bot-id';
+process.env.BOT_PASSWORD = 'test-bot-password';
+
+/**
+ * Helper: generate a valid HMAC signature for test requests (S-2)
+ */
+function createTestSignature(userId: string): { signature: string; timestamp: string } {
+  return generateInternalSignature(userId);
+}
 
 jest.mock('../../src/config/logger', () => ({
   logger: {
@@ -238,10 +258,13 @@ describe('OAuth Routes', () => {
   });
 
   describe('POST /auth/oauth/revoke', () => {
-    it('should revoke authentication', async () => {
+    it('should revoke authentication with valid signature', async () => {
+      const { signature, timestamp } = createTestSignature('user-123');
       const req = {
         body: {
-          userId: 'user-123'
+          userId: 'user-123',
+          signature,
+          timestamp
         }
       };
       const res = {
@@ -274,12 +297,33 @@ describe('OAuth Routes', () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it('should handle revoke errors', async () => {
-      mockOAuthService.revokeAuth.mockRejectedValue(new Error('Revoke failed'));
-
+    it('should return 403 if signature is missing or invalid', async () => {
       const req = {
         body: {
           userId: 'user-123'
+          // No signature
+        }
+      };
+      const res = {
+        send: jest.fn()
+      };
+      const next = jest.fn();
+
+      await routes['POST /auth/oauth/revoke'](req, res, next);
+
+      expect(res.send).toHaveBeenCalledWith(403, { error: 'Forbidden: invalid or missing authentication' });
+      expect(next).toHaveBeenCalled();
+    });
+
+    it('should handle revoke errors with valid signature', async () => {
+      mockOAuthService.revokeAuth.mockRejectedValue(new Error('Revoke failed'));
+      const { signature, timestamp } = createTestSignature('user-123');
+
+      const req = {
+        body: {
+          userId: 'user-123',
+          signature,
+          timestamp
         }
       };
       const res = {
@@ -297,9 +341,12 @@ describe('OAuth Routes', () => {
   describe('GET /auth/oauth/status', () => {
     // Skip: needs investigation - asyncHandler wrapper may affect test behavior
     it.skip('should return authenticated status', async () => {
+      const { signature, timestamp } = createTestSignature('user-123');
       const req = {
         query: {
-          userId: 'user-123'
+          userId: 'user-123',
+          signature,
+          timestamp
         }
       };
       const res = {
@@ -321,13 +368,14 @@ describe('OAuth Routes', () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it('should return not authenticated for unknown user', async () => {
+    it('should return 403 for requests without valid signature', async () => {
       mockOAuthService.isAuthenticated.mockResolvedValue(false);
       mockOAuthService.getUserSession.mockResolvedValue(null);
 
       const req = {
         query: {
           userId: 'unknown-user'
+          // No signature
         }
       };
       const res = {
@@ -337,9 +385,8 @@ describe('OAuth Routes', () => {
 
       await routes['GET /auth/oauth/status'](req, res, next);
 
-      expect(res.send).toHaveBeenCalledWith(200, {
-        authenticated: false,
-        user: null
+      expect(res.send).toHaveBeenCalledWith(403, {
+        error: 'Forbidden: invalid or missing authentication'
       });
       expect(next).toHaveBeenCalled();
     });
@@ -359,12 +406,13 @@ describe('OAuth Routes', () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it('should handle errors gracefully', async () => {
+    it('should return 403 for invalid signature even when service would error', async () => {
       mockOAuthService.isAuthenticated.mockRejectedValue(new Error('Check failed'));
 
       const req = {
         query: {
           userId: 'user-123'
+          // No valid signature
         }
       };
       const res = {
@@ -374,7 +422,7 @@ describe('OAuth Routes', () => {
 
       await routes['GET /auth/oauth/status'](req, res, next);
 
-      expect(res.send).toHaveBeenCalledWith(500, { error: 'Failed to check authentication status' });
+      expect(res.send).toHaveBeenCalledWith(403, { error: 'Forbidden: invalid or missing authentication' });
       expect(next).toHaveBeenCalled();
     });
   });

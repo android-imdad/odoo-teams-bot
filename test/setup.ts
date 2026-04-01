@@ -16,6 +16,9 @@ process.env = {
   PORT: '3978',
   LOG_LEVEL: 'error',
   LOG_FILE: '/tmp/test-bot.log',
+  // Required for api_key mode (default) - S-4 security fix
+  TOKEN_ENCRYPTION_KEY: 'test-secure-encryption-key-for-ci-1234567890',
+  AUTH_MODE: 'admin_proxy',
 };
 
 // Increase timeout for async operations

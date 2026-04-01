@@ -30,9 +30,9 @@ export class UserMappingService {
     private executeKw: (model: string, method: string, params: any[]) => Promise<any>,
     _cacheTtl: number = 3600000 // 1 hour default - passed from config
   ) {
-    this.userCache = new Cache<OdooUserInfo>();
+    this.userCache = new Cache<OdooUserInfo>(5000);
     this.userCache.startCleanup();
-    this.failedLookups = new Cache<boolean>();
+    this.failedLookups = new Cache<boolean>(1000);
     this.failedLookups.startCleanup();
 
     logger.info('UserMappingService initialized');
