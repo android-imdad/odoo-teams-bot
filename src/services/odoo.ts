@@ -568,14 +568,7 @@ class OdooService {
       targetUserName: odooUser.name
     });
 
-    // R-1: Include Teams email in description for audit trail
-    // Odoo's create_uid will show the admin, so we embed the actual user info
-    const attributedEntry = {
-      ...entry,
-      description: `[${userEmail}] ${entry.description}`
-    };
-
-    return this.createTimesheetEntry(attributedEntry, userId, auth);
+    return this.createTimesheetEntry(entry, userId, auth);
   }
 
   /**
