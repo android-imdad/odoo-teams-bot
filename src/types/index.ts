@@ -7,6 +7,7 @@ export interface TimesheetEntry {
   date: string; // YYYY-MM-DD format
   description: string;
   user_id?: number;
+  billable?: boolean; // true = billable, false = non-billable, undefined = use Odoo default
 }
 
 export interface ParsedTimesheetData {
@@ -21,6 +22,7 @@ export interface ParsedTimesheetData {
   error?: string;
   create_new_task?: boolean;
   new_task_name?: string | null;
+  billable?: boolean | null; // null = not explicitly mentioned, true/false = explicitly set
 }
 
 export interface CacheEntry<T> {

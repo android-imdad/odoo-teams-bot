@@ -105,7 +105,7 @@ describe('TimesheetCardGenerator', () => {
       const card = TimesheetCardGenerator.createConfirmationCard(dataWithLongDesc);
       const factSet = card.content.body[1];
 
-      expect(factSet.facts[3].value).toBe(longDescription);
+      expect(factSet.facts[4].value).toBe(longDescription);
     });
 
     it('should handle special characters in description', () => {
@@ -114,7 +114,7 @@ describe('TimesheetCardGenerator', () => {
       const card = TimesheetCardGenerator.createConfirmationCard(dataWithSpecial);
       const factSet = card.content.body[1];
 
-      expect(factSet.facts[3].value).toContain('quotes');
+      expect(factSet.facts[4].value).toContain('quotes');
     });
 
     it('should handle project names with special characters', () => {
@@ -436,7 +436,7 @@ describe('TimesheetCardGenerator', () => {
       const card = TimesheetCardGenerator.createConfirmationCard(dataWithEmptyDesc);
       const factSet = card.content.body[1];
 
-      expect(factSet.facts[3].value).toBe('');
+      expect(factSet.facts[4].value).toBe('');
     });
 
     it('should handle description with newlines', () => {
@@ -444,7 +444,7 @@ describe('TimesheetCardGenerator', () => {
       const card = TimesheetCardGenerator.createConfirmationCard(dataWithNewlines);
       const factSet = card.content.body[1];
 
-      expect(factSet.facts[3].value).toContain('Line 1');
+      expect(factSet.facts[4].value).toContain('Line 1');
     });
 
     it('should handle extremely long project names', () => {
@@ -462,7 +462,7 @@ describe('TimesheetCardGenerator', () => {
       const card = TimesheetCardGenerator.createConfirmationCard(dataWithUnicode);
       const factSet = card.content.body[1];
 
-      expect(factSet.facts[3].value).toContain('😊');
+      expect(factSet.facts[4].value).toContain('😊');
     });
 
     it('should handle null values gracefully in error scenario', () => {
@@ -555,7 +555,7 @@ describe('TimesheetCardGenerator', () => {
       const card = TimesheetCardGenerator.createConfirmedCard(dataWithTask);
       const factSet = card.content.body[1];
 
-      expect(factSet.facts).toHaveLength(5);
+      expect(factSet.facts).toHaveLength(6);
       expect(factSet.facts[1]).toEqual({
         title: 'Task:',
         value: 'Development'

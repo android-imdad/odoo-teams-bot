@@ -14,6 +14,7 @@ export interface TimesheetCardData {
   hours: number;
   date: string;
   description: string;
+  billable?: boolean; // true = billable, false = non-billable, undefined = not set
 }
 
 export interface BotError extends Error {

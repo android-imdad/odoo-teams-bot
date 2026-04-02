@@ -70,8 +70,14 @@ OUTPUT SCHEMA (strict JSON, no additional text):
   "hours": <positive number or null>,
   "date": "<YYYY-MM-DD or null>",
   "description": "<string>",
-  "confidence": <number between 0-1>
-}`;
+  "confidence": <number between 0-1>,
+  "billable": <true, false, or null>
+}
+
+BILLABILITY RULES:
+- If user explicitly mentions "billable", "bill", "chargeable", "client-billable" → set billable to true
+- If user explicitly mentions "non-billable", "non billable", "not billable", "internal", "non-chargeable" → set billable to false
+- If user does NOT mention billability at all → set billable to null (the system will use their default preference)`;
   }
 
   /**
@@ -196,6 +202,7 @@ Parsing rules:
         date: null,
         description: userText,
         confidence: 0,
+        billable: null,
         error: error instanceof Error ? error.message : 'Unknown parsing error'
       };
     }
@@ -251,7 +258,8 @@ Parsing rules:
         ? Math.max(0, Math.min(1, data.confidence))
         : 0,
       create_new_task: data.create_new_task === true,
-      new_task_name: data.new_task_name || null
+      new_task_name: data.new_task_name || null,
+      billable: data.billable === true ? true : data.billable === false ? false : null
     };
 
     // Add validation warnings

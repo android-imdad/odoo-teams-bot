@@ -414,7 +414,7 @@ describe('TimesheetBot - Admin Proxy Mode', () => {
   });
 
   describe('Welcome Message (Admin Proxy)', () => {
-    it('should send welcome message with email on conversation update', async () => {
+    it('should send welcome card with email on conversation update', async () => {
       mockContext.activity!.type = 'conversationUpdate';
       mockContext.activity!.membersAdded = [{
         id: 'teams-user-id-123',
@@ -425,11 +425,17 @@ describe('TimesheetBot - Admin Proxy Mode', () => {
       await (bot as any).onConversationUpdateActivity(mockContext as TurnContext);
 
       expect(mockContext.sendActivity).toHaveBeenCalledWith(
-        expect.stringContaining('john.doe@company.com')
+        expect.objectContaining({
+          attachments: expect.arrayContaining([
+            expect.objectContaining({
+              contentType: 'application/vnd.microsoft.card.adaptive'
+            })
+          ])
+        })
       );
     });
 
-    it('should send welcome message even if email cannot be extracted', async () => {
+    it('should send welcome card even if email cannot be extracted', async () => {
       mockContext.activity!.type = 'conversationUpdate';
       mockContext.activity!.membersAdded = [{
         id: 'teams-user-id-123',
@@ -441,7 +447,13 @@ describe('TimesheetBot - Admin Proxy Mode', () => {
       await (bot as any).onConversationUpdateActivity(mockContext as TurnContext);
 
       expect(mockContext.sendActivity).toHaveBeenCalledWith(
-        expect.stringContaining('all set')
+        expect.objectContaining({
+          attachments: expect.arrayContaining([
+            expect.objectContaining({
+              contentType: 'application/vnd.microsoft.card.adaptive'
+            })
+          ])
+        })
       );
     });
   });

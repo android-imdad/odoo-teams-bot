@@ -96,7 +96,8 @@ describe('ParserService', () => {
         hours: 4.5,
         date: '2024-01-15',
         description: 'Homepage redesign work',
-        confidence: 0.95
+        confidence: 0.95,
+        billable: null
       });
     });
 
@@ -227,6 +228,7 @@ describe('ParserService', () => {
         date: null,
         description: 'Test input',
         confidence: 0,
+        billable: null,
         error: 'AI API error'
       });
     });
@@ -253,6 +255,7 @@ describe('ParserService', () => {
         date: null,
         description: 'Test input',
         confidence: 0,
+        billable: null,
         error: 'Invalid response format from AI'
       });
     });

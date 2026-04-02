@@ -16,6 +16,7 @@ import { OAuthService } from './services/oauth';
 import { ApiKeyAuthService } from './services/apiKeyAuth';
 import { sanitizeTimesheetInput } from './utils/sanitization';
 import { Validator } from './utils/validation';
+import { BillabilityPreferenceService } from './services/billabilityPreference';
 import crypto from 'crypto';
 
 /** Hash an email for safe logging (I-1) */
@@ -30,6 +31,7 @@ export class TimesheetBot extends TeamsActivityHandler {
   private odooService: OdooService;
   private useApiKeyAuth: boolean;
   private isAdminProxyMode: boolean;
+  private billabilityService: BillabilityPreferenceService;
 
   constructor(
     oauthService: OAuthService | undefined,
@@ -44,6 +46,7 @@ export class TimesheetBot extends TeamsActivityHandler {
     this.odooService = odooService;
     this.useApiKeyAuth = useApiKeyAuth;
     this.isAdminProxyMode = isAdminProxyMode;
+    this.billabilityService = new BillabilityPreferenceService();
 
     // Handle incoming messages
     this.onMessage(async (context, next) => {
@@ -73,12 +76,11 @@ export class TimesheetBot extends TeamsActivityHandler {
           // In admin proxy mode, no authentication needed - welcome the user directly
           if (this.isAdminProxyMode) {
             const teamsEmail = await this.extractTeamsEmail(context, teamsUserId);
-            await context.sendActivity(
-              `Welcome to the Odoo Timesheet Bot! 🎉\n\n` +
-              `You're all set! Send a message like "Log 2 hours on Project X" to get started.` +
-              (teamsEmail ? `\n\nYour timesheets will be logged for: ${teamsEmail}` : '')
-            );
-            logger.info('Welcome message sent (admin proxy mode)', { memberId: teamsUserId, emailHash: hashEmail(teamsEmail) });
+            const welcomeCard = TimesheetCardGenerator.createWelcomeCard(teamsEmail);
+            await context.sendActivity({
+              attachments: [welcomeCard]
+            });
+            logger.info('Welcome card sent (admin proxy mode)', { memberId: teamsUserId, emailHash: hashEmail(teamsEmail) });
             continue;
           }
 
@@ -138,6 +140,10 @@ export class TimesheetBot extends TeamsActivityHandler {
       }
       if (actionData?.action === 'choose_api_key_auth') {
         await this.handleApiKeyConnect(context);
+        return;
+      }
+      if (actionData?.action === 'set_billability') {
+        await this.handleSetBillability(context, actionData);
         return;
       }
 
@@ -207,6 +213,46 @@ export class TimesheetBot extends TeamsActivityHandler {
           return;
         }
         await this.handleDisconnect(context);
+        return;
+      }
+
+      // Handle billability commands
+      if (lowerText === 'set billable' || lowerText === 'set default billable' || lowerText === 'billable default') {
+        this.billabilityService.setPreference(teamsUserId, 'billable');
+        await context.sendActivity('✅ Default billability set to **💰 Billable**. All your future timesheets will be marked as billable unless you say otherwise.');
+        return;
+      }
+
+      if (lowerText === 'set non-billable' || lowerText === 'set non billable' || lowerText === 'set default non-billable' || lowerText === 'non-billable default') {
+        this.billabilityService.setPreference(teamsUserId, 'non-billable');
+        await context.sendActivity('✅ Default billability set to **🏷️ Non-Billable**. All your future timesheets will be marked as non-billable unless you say otherwise.');
+        return;
+      }
+
+      if (lowerText === 'clear billability' || lowerText === 'reset billability') {
+        this.billabilityService.clearPreference(teamsUserId);
+        await context.sendActivity('✅ Billability default cleared. Timesheets will use the Odoo project/task default.');
+        return;
+      }
+
+      if (lowerText === 'billability' || lowerText === 'billability settings' || lowerText === 'billing') {
+        const currentPref = this.billabilityService.getPreference(teamsUserId);
+        const prefLabel = currentPref === 'billable' ? '💰 Billable'
+          : currentPref === 'non-billable' ? '🏷️ Non-Billable'
+          : '⚪ Not Set (using Odoo default)';
+        const settingsCard = TimesheetCardGenerator.createBillabilitySettingsCard(prefLabel);
+        await context.sendActivity({ attachments: [settingsCard] });
+        return;
+      }
+
+      // Handle help command
+      if (lowerText === 'help') {
+        const currentPref = this.billabilityService.getPreference(teamsUserId);
+        const prefLabel = currentPref === 'billable' ? '💰 Billable'
+          : currentPref === 'non-billable' ? '🏷️ Non-Billable'
+          : undefined;
+        const welcomeCard = TimesheetCardGenerator.createWelcomeCard(teamsEmail, prefLabel);
+        await context.sendActivity({ attachments: [welcomeCard] });
         return;
       }
 
@@ -281,6 +327,21 @@ export class TimesheetBot extends TeamsActivityHandler {
         return;
       }
 
+      // Determine billability:
+      // 1. If AI detected explicit billability in the prompt, use that
+      // 2. Otherwise, fall back to the user's default preference
+      // 3. If no default set, leave undefined (Odoo will use its own default)
+      let billable: boolean | undefined;
+      if (parsed.billable === true) {
+        billable = true;
+      } else if (parsed.billable === false) {
+        billable = false;
+      } else {
+        // AI didn't detect explicit billability — use user's default preference
+        const userPref = this.billabilityService.getPreference(teamsUserId);
+        billable = BillabilityPreferenceService.toBillableBoolean(userPref);
+      }
+
       // Create confirmation card
       const cardData: TimesheetCardData = {
         project_id: parsed.project_id,
@@ -291,12 +352,14 @@ export class TimesheetBot extends TeamsActivityHandler {
         new_task_name: parsed.new_task_name || undefined,
         hours: parsed.hours,
         date: parsed.date,
-        description: parsed.description
+        description: parsed.description,
+        billable
       };
 
+      const billableLabel = BillabilityPreferenceService.getLabel(cardData.billable);
       const confirmCard = TimesheetCardGenerator.createConfirmationCard(cardData);
       await context.sendActivity({
-        text: `Please confirm your timesheet:\n\nProject: ${cardData.project_name}\nTask: ${cardData.task_name || 'None'}\nHours: ${cardData.hours}\nDate: ${cardData.date}\nDescription: ${cardData.description}`,
+        text: `Please confirm your timesheet:\n\nProject: ${cardData.project_name}\nTask: ${cardData.task_name || 'None'}\nHours: ${cardData.hours}\nDate: ${cardData.date}\nBillable: ${billableLabel}\nDescription: ${cardData.description}`,
         attachments: [confirmCard]
       });
 
@@ -632,6 +695,29 @@ export class TimesheetBot extends TeamsActivityHandler {
   }
 
   /**
+   * Handle billability preference set via Adaptive Card action
+   */
+  private async handleSetBillability(context: TurnContext, data: any): Promise<void> {
+    const teamsUserId = context.activity.from.id;
+    const billability = data.billability;
+
+    if (billability === 'billable') {
+      this.billabilityService.setPreference(teamsUserId, 'billable');
+      await context.sendActivity('✅ Default billability set to **💰 Billable**. All your future timesheets will be marked as billable unless you say otherwise.');
+    } else if (billability === 'non-billable') {
+      this.billabilityService.setPreference(teamsUserId, 'non-billable');
+      await context.sendActivity('✅ Default billability set to **🏷️ Non-Billable**. All your future timesheets will be marked as non-billable unless you say otherwise.');
+    } else if (billability === 'unset') {
+      this.billabilityService.clearPreference(teamsUserId);
+      await context.sendActivity('✅ Billability default cleared. Timesheets will use the Odoo project/task default.');
+    } else {
+      await context.sendActivity('Invalid billability option. Use "set billable", "set non-billable", or "clear billability".');
+    }
+
+    logger.info('Billability preference set via card', { teamsUserId, billability });
+  }
+
+  /**
    * Handle timesheet save confirmation
    */
   private async handleSaveTimesheet(
@@ -714,7 +800,8 @@ export class TimesheetBot extends TeamsActivityHandler {
         task_name: taskName,
         hours: data.hours,
         date: data.date,
-        description: data.description
+        description: data.description,
+        billable: data.billable
       };
 
       // Create timesheet in Odoo

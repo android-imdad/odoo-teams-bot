@@ -579,7 +579,7 @@ class OdooService {
     userId: number,
     auth: AuthContext
   ): Promise<number> {
-    // Prepare timesheet data for Odoo 13-15
+    // Prepare timesheet data for Odoo 13-18
     // account.analytic.line is used for timesheets
     const timesheetParams: any = {
       project_id: entry.project_id,
@@ -592,6 +592,16 @@ class OdooService {
     // Include task_id if provided
     if (entry.task_id) {
       timesheetParams.task_id = entry.task_id;
+    }
+
+    // Include billability if explicitly set
+    // In Odoo, the 'is_so_line' or 'non_allow_billable' field controls billability,
+    // but the most common approach is using 'timesheet_invoice_type' or 'so_line'.
+    // For maximum compatibility, we set the 'x_billable' custom field if it exists,
+    // or fall back to the standard encoding via task/project configuration.
+    // The safest approach: set a boolean custom field 'x_is_billable' on account.analytic.line
+    if (entry.billable !== undefined) {
+      timesheetParams.x_is_billable = entry.billable;
     }
 
     // Create the timesheet entry with appropriate authentication

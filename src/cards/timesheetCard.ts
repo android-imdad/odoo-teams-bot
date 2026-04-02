@@ -1,8 +1,16 @@
 import { CardFactory, Attachment } from 'botbuilder';
 import { TimesheetCardData } from '../types/bot.types';
 import { format } from 'date-fns';
+import { BillabilityPreferenceService } from '../services/billabilityPreference';
 
 export class TimesheetCardGenerator {
+  /**
+   * Get the billability display label for a card
+   */
+  private static getBillabilityLabel(billable: boolean | undefined): string {
+    return BillabilityPreferenceService.getLabel(billable);
+  }
+
   /**
    * Generate Adaptive Card for timesheet confirmation
    */
@@ -62,6 +70,10 @@ export class TimesheetCardGenerator {
             {
               title: 'Date:',
               value: this.formatDate(data.date)
+            },
+            {
+              title: 'Billable:',
+              value: this.getBillabilityLabel(data.billable)
             },
             {
               title: 'Description:',
@@ -138,6 +150,10 @@ export class TimesheetCardGenerator {
             {
               title: 'Date:',
               value: this.formatDate(data.date)
+            },
+            {
+              title: 'Billable:',
+              value: this.getBillabilityLabel(data.billable)
             },
             {
               title: 'Description:',
@@ -352,6 +368,184 @@ export class TimesheetCardGenerator {
               isSubtle: true
             }
           ]
+        }
+      ]
+    };
+
+    return CardFactory.adaptiveCard(card);
+  }
+
+  /**
+   * Generate welcome card with sample prompts and billability info
+   */
+  static createWelcomeCard(teamsEmail?: string, currentBillability?: string): Attachment {
+    const card = {
+      type: 'AdaptiveCard',
+      $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+      version: '1.5',
+      body: [
+        {
+          type: 'Container',
+          items: [
+            {
+              type: 'TextBlock',
+              text: '🎉 Welcome to the Odoo Timesheet Bot!',
+              weight: 'Bolder',
+              size: 'Large',
+              color: 'Accent'
+            },
+            {
+              type: 'TextBlock',
+              text: teamsEmail
+                ? `Your timesheets will be logged for: **${teamsEmail}**`
+                : 'You\'re all set to start logging timesheets!',
+              wrap: true,
+              spacing: 'Small'
+            }
+          ]
+        },
+        {
+          type: 'Container',
+          spacing: 'Medium',
+          items: [
+            {
+              type: 'TextBlock',
+              text: '📝 Sample Time Log Prompts',
+              weight: 'Bolder',
+              size: 'Medium'
+            },
+            {
+              type: 'TextBlock',
+              text: '• "4 hours on Website project fixing homepage layout"',
+              wrap: true,
+              spacing: 'Small',
+              fontType: 'Monospace',
+              size: 'Small'
+            },
+            {
+              type: 'TextBlock',
+              text: '• "2.5h on SSI project code review, billable"',
+              wrap: true,
+              spacing: 'Small',
+              fontType: 'Monospace',
+              size: 'Small'
+            },
+            {
+              type: 'TextBlock',
+              text: '• "yesterday 3 hours internal meeting on Project Alpha, non-billable"',
+              wrap: true,
+              spacing: 'Small',
+              fontType: 'Monospace',
+              size: 'Small'
+            },
+            {
+              type: 'TextBlock',
+              text: '• "logged 6h on Client Portal create task API integration"',
+              wrap: true,
+              spacing: 'Small',
+              fontType: 'Monospace',
+              size: 'Small'
+            }
+          ]
+        },
+        {
+          type: 'Container',
+          spacing: 'Medium',
+          items: [
+            {
+              type: 'TextBlock',
+              text: '⚙️ Billability Settings',
+              weight: 'Bolder',
+              size: 'Medium'
+            },
+            {
+              type: 'TextBlock',
+              text: currentBillability
+                ? `Current default: **${currentBillability}**`
+                : 'No default billability set. Each entry will use the Odoo project default.',
+              wrap: true,
+              spacing: 'Small'
+            },
+            {
+              type: 'TextBlock',
+              text: 'Set a default so you don\'t have to specify it every time:',
+              wrap: true,
+              spacing: 'Small',
+              isSubtle: true
+            }
+          ]
+        }
+      ],
+      actions: [
+        {
+          type: 'Action.Submit',
+          title: '💰 Set Default: Billable',
+          data: { action: 'set_billability', billability: 'billable' },
+          style: 'positive'
+        },
+        {
+          type: 'Action.Submit',
+          title: '🏷️ Set Default: Non-Billable',
+          data: { action: 'set_billability', billability: 'non-billable' }
+        }
+      ]
+    };
+
+    return CardFactory.adaptiveCard(card);
+  }
+
+  /**
+   * Generate billability settings card
+   */
+  static createBillabilitySettingsCard(currentPreference: string): Attachment {
+    const card = {
+      type: 'AdaptiveCard',
+      $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+      version: '1.5',
+      body: [
+        {
+          type: 'Container',
+          items: [
+            {
+              type: 'TextBlock',
+              text: '⚙️ Billability Settings',
+              weight: 'Bolder',
+              size: 'Large',
+              color: 'Accent'
+            },
+            {
+              type: 'TextBlock',
+              text: `Current default: **${currentPreference}**`,
+              wrap: true,
+              spacing: 'Small'
+            },
+            {
+              type: 'TextBlock',
+              text: 'Choose a default billability for all your timesheet entries. You can always override it by saying "billable" or "non-billable" in your time log message.',
+              wrap: true,
+              spacing: 'Medium',
+              isSubtle: true
+            }
+          ]
+        }
+      ],
+      actions: [
+        {
+          type: 'Action.Submit',
+          title: '💰 Set Billable',
+          data: { action: 'set_billability', billability: 'billable' },
+          style: 'positive'
+        },
+        {
+          type: 'Action.Submit',
+          title: '🏷️ Set Non-Billable',
+          data: { action: 'set_billability', billability: 'non-billable' }
+        },
+        {
+          type: 'Action.Submit',
+          title: '⚪ Clear Default',
+          data: { action: 'set_billability', billability: 'unset' },
+          style: 'destructive'
         }
       ]
     };
