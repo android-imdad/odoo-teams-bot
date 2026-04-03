@@ -10,6 +10,7 @@ import { TokenRefreshJob } from './services/tokenRefresh';
 import { registerOAuthRoutes } from './routes/oauth';
 import { OdooService } from './services/odoo';
 import { createRateLimiter, RateLimitPresets } from './middleware/rateLimit';
+import { BillabilityPreferenceService } from './services/billabilityPreference';
 import path from 'path';
 import fs from 'fs';
 
@@ -19,6 +20,7 @@ let oauthService: OAuthService | undefined;
 let apiKeyAuthService: ApiKeyAuthService | undefined;
 let tokenRefreshJob: TokenRefreshJob | undefined;
 let odooService: OdooService;
+let billabilityService: BillabilityPreferenceService;
 
 // Authentication mode: 'service_account' | 'oauth' | 'api_key' | 'admin_proxy'
 const AUTH_MODE = process.env.AUTH_MODE || 'api_key'; // Default to API key for multi-user support
@@ -227,9 +229,13 @@ async function startServer(): Promise<void> {
     odooService = new OdooService(config.odoo, oauthService, apiKeyAuthService, isAdminProxyMode);
     logger.info('Odoo service initialized', { authMode: AUTH_MODE, adminProxyMode: isAdminProxyMode });
 
+    // Initialize billability preference service (persists across restarts)
+    billabilityService = new BillabilityPreferenceService();
+    await billabilityService.initialize();
+
     // Create bot instance with initialized services
     const useApiKeyAuth = AUTH_MODE === 'api_key';
-    bot = new TimesheetBot(oauthService, apiKeyAuthService, odooService, useApiKeyAuth, isAdminProxyMode);
+    bot = new TimesheetBot(oauthService, apiKeyAuthService, odooService, useApiKeyAuth, isAdminProxyMode, billabilityService);
 
     // Register bot endpoint
     registerBotEndpoint();
@@ -310,6 +316,12 @@ process.on('SIGINT', async () => {
     logger.info('Token storage closed');
   }
 
+  // Close billability service
+  if (billabilityService) {
+    await billabilityService.close();
+    logger.info('Billability service closed');
+  }
+
   server.close(() => {
     logger.info('Server closed');
     process.exit(0);
@@ -329,6 +341,12 @@ process.on('SIGTERM', async () => {
   if (tokenStorage) {
     await tokenStorage.close();
     logger.info('Token storage closed');
+  }
+
+  // Close billability service
+  if (billabilityService) {
+    await billabilityService.close();
+    logger.info('Billability service closed');
   }
 
   server.close(() => {

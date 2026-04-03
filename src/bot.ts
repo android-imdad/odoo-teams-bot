@@ -38,7 +38,8 @@ export class TimesheetBot extends TeamsActivityHandler {
     apiKeyAuthService: ApiKeyAuthService | undefined,
     odooService: OdooService,
     useApiKeyAuth: boolean = false,
-    isAdminProxyMode: boolean = false
+    isAdminProxyMode: boolean = false,
+    billabilityService?: BillabilityPreferenceService
   ) {
     super();
     this.oauthService = oauthService;
@@ -46,7 +47,7 @@ export class TimesheetBot extends TeamsActivityHandler {
     this.odooService = odooService;
     this.useApiKeyAuth = useApiKeyAuth;
     this.isAdminProxyMode = isAdminProxyMode;
-    this.billabilityService = new BillabilityPreferenceService();
+    this.billabilityService = billabilityService || new BillabilityPreferenceService();
 
     // Handle incoming messages
     this.onMessage(async (context, next) => {
@@ -218,25 +219,25 @@ export class TimesheetBot extends TeamsActivityHandler {
 
       // Handle billability commands
       if (lowerText === 'set billable' || lowerText === 'set default billable' || lowerText === 'billable default') {
-        this.billabilityService.setPreference(teamsUserId, 'billable');
+        await this.billabilityService.setPreference(teamsUserId, 'billable');
         await context.sendActivity('✅ Default billability set to **💰 Billable**. All your future timesheets will be marked as billable unless you say otherwise.');
         return;
       }
 
       if (lowerText === 'set non-billable' || lowerText === 'set non billable' || lowerText === 'set default non-billable' || lowerText === 'non-billable default') {
-        this.billabilityService.setPreference(teamsUserId, 'non-billable');
+        await this.billabilityService.setPreference(teamsUserId, 'non-billable');
         await context.sendActivity('✅ Default billability set to **🏷️ Non-Billable**. All your future timesheets will be marked as non-billable unless you say otherwise.');
         return;
       }
 
       if (lowerText === 'clear billability' || lowerText === 'reset billability') {
-        this.billabilityService.clearPreference(teamsUserId);
+        await this.billabilityService.clearPreference(teamsUserId);
         await context.sendActivity('✅ Billability default cleared. Timesheets will use the Odoo project/task default.');
         return;
       }
 
       if (lowerText === 'billability' || lowerText === 'billability settings' || lowerText === 'billing') {
-        const currentPref = this.billabilityService.getPreference(teamsUserId);
+        const currentPref = await this.billabilityService.getPreference(teamsUserId);
         const prefLabel = currentPref === 'billable' ? '💰 Billable'
           : currentPref === 'non-billable' ? '🏷️ Non-Billable'
           : '⚪ Not Set (using Odoo default)';
@@ -247,7 +248,7 @@ export class TimesheetBot extends TeamsActivityHandler {
 
       // Handle help command
       if (lowerText === 'help') {
-        const currentPref = this.billabilityService.getPreference(teamsUserId);
+        const currentPref = await this.billabilityService.getPreference(teamsUserId);
         const prefLabel = currentPref === 'billable' ? '💰 Billable'
           : currentPref === 'non-billable' ? '🏷️ Non-Billable'
           : undefined;
@@ -338,7 +339,7 @@ export class TimesheetBot extends TeamsActivityHandler {
         billable = false;
       } else {
         // AI didn't detect explicit billability — use user's default preference
-        const userPref = this.billabilityService.getPreference(teamsUserId);
+        const userPref = await this.billabilityService.getPreference(teamsUserId);
         billable = BillabilityPreferenceService.toBillableBoolean(userPref);
       }
 
@@ -702,13 +703,13 @@ export class TimesheetBot extends TeamsActivityHandler {
     const billability = data.billability;
 
     if (billability === 'billable') {
-      this.billabilityService.setPreference(teamsUserId, 'billable');
+      await this.billabilityService.setPreference(teamsUserId, 'billable');
       await context.sendActivity('✅ Default billability set to **💰 Billable**. All your future timesheets will be marked as billable unless you say otherwise.');
     } else if (billability === 'non-billable') {
-      this.billabilityService.setPreference(teamsUserId, 'non-billable');
+      await this.billabilityService.setPreference(teamsUserId, 'non-billable');
       await context.sendActivity('✅ Default billability set to **🏷️ Non-Billable**. All your future timesheets will be marked as non-billable unless you say otherwise.');
     } else if (billability === 'unset') {
-      this.billabilityService.clearPreference(teamsUserId);
+      await this.billabilityService.clearPreference(teamsUserId);
       await context.sendActivity('✅ Billability default cleared. Timesheets will use the Odoo project/task default.');
     } else {
       await context.sendActivity('Invalid billability option. Use "set billable", "set non-billable", or "clear billability".');

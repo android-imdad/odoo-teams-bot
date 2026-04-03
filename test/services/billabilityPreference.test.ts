@@ -1,8 +1,10 @@
 /**
- * Tests for BillabilityPreferenceService
+ * Tests for BillabilityPreferenceService (SQLite-backed)
  */
 
 import { BillabilityPreferenceService } from '../../src/services/billabilityPreference';
+import fs from 'fs';
+import path from 'path';
 
 // Mock logger
 jest.mock('../../src/config/logger', () => ({
@@ -16,76 +18,119 @@ jest.mock('../../src/config/logger', () => ({
 
 describe('BillabilityPreferenceService', () => {
   let service: BillabilityPreferenceService;
+  const testDbPath = path.join(__dirname, '..', 'test-billability.db');
 
-  beforeEach(() => {
-    service = new BillabilityPreferenceService();
+  beforeEach(async () => {
+    // Clean up any leftover test DB
+    if (fs.existsSync(testDbPath)) {
+      fs.unlinkSync(testDbPath);
+    }
+    service = new BillabilityPreferenceService(testDbPath);
+    await service.initialize();
+  });
+
+  afterEach(async () => {
+    await service.close();
+    if (fs.existsSync(testDbPath)) {
+      fs.unlinkSync(testDbPath);
+    }
   });
 
   describe('setPreference', () => {
-    it('should set billable preference for a user', () => {
-      service.setPreference('user-1', 'billable');
-      expect(service.getPreference('user-1')).toBe('billable');
+    it('should set billable preference for a user', async () => {
+      await service.setPreference('user-1', 'billable');
+      expect(await service.getPreference('user-1')).toBe('billable');
     });
 
-    it('should set non-billable preference for a user', () => {
-      service.setPreference('user-1', 'non-billable');
-      expect(service.getPreference('user-1')).toBe('non-billable');
+    it('should set non-billable preference for a user', async () => {
+      await service.setPreference('user-1', 'non-billable');
+      expect(await service.getPreference('user-1')).toBe('non-billable');
     });
 
-    it('should overwrite existing preference', () => {
-      service.setPreference('user-1', 'billable');
-      expect(service.getPreference('user-1')).toBe('billable');
+    it('should overwrite existing preference', async () => {
+      await service.setPreference('user-1', 'billable');
+      expect(await service.getPreference('user-1')).toBe('billable');
 
-      service.setPreference('user-1', 'non-billable');
-      expect(service.getPreference('user-1')).toBe('non-billable');
+      await service.setPreference('user-1', 'non-billable');
+      expect(await service.getPreference('user-1')).toBe('non-billable');
     });
 
-    it('should handle multiple users independently', () => {
-      service.setPreference('user-1', 'billable');
-      service.setPreference('user-2', 'non-billable');
+    it('should handle multiple users independently', async () => {
+      await service.setPreference('user-1', 'billable');
+      await service.setPreference('user-2', 'non-billable');
 
-      expect(service.getPreference('user-1')).toBe('billable');
-      expect(service.getPreference('user-2')).toBe('non-billable');
+      expect(await service.getPreference('user-1')).toBe('billable');
+      expect(await service.getPreference('user-2')).toBe('non-billable');
     });
   });
 
   describe('getPreference', () => {
-    it('should return "unset" for unknown user', () => {
-      expect(service.getPreference('unknown-user')).toBe('unset');
+    it('should return "unset" for unknown user', async () => {
+      expect(await service.getPreference('unknown-user')).toBe('unset');
     });
 
-    it('should return the set preference', () => {
-      service.setPreference('user-1', 'billable');
-      expect(service.getPreference('user-1')).toBe('billable');
+    it('should return the set preference', async () => {
+      await service.setPreference('user-1', 'billable');
+      expect(await service.getPreference('user-1')).toBe('billable');
     });
   });
 
   describe('hasPreference', () => {
-    it('should return false for unknown user', () => {
-      expect(service.hasPreference('unknown-user')).toBe(false);
+    it('should return false for unknown user', async () => {
+      expect(await service.hasPreference('unknown-user')).toBe(false);
     });
 
-    it('should return true after setting preference', () => {
-      service.setPreference('user-1', 'billable');
-      expect(service.hasPreference('user-1')).toBe(true);
+    it('should return true after setting preference', async () => {
+      await service.setPreference('user-1', 'billable');
+      expect(await service.hasPreference('user-1')).toBe(true);
     });
 
-    it('should return false after clearing preference', () => {
-      service.setPreference('user-1', 'billable');
-      service.clearPreference('user-1');
-      expect(service.hasPreference('user-1')).toBe(false);
+    it('should return false after clearing preference', async () => {
+      await service.setPreference('user-1', 'billable');
+      await service.clearPreference('user-1');
+      expect(await service.hasPreference('user-1')).toBe(false);
     });
   });
 
   describe('clearPreference', () => {
-    it('should clear an existing preference', () => {
-      service.setPreference('user-1', 'billable');
-      service.clearPreference('user-1');
-      expect(service.getPreference('user-1')).toBe('unset');
+    it('should clear an existing preference', async () => {
+      await service.setPreference('user-1', 'billable');
+      await service.clearPreference('user-1');
+      expect(await service.getPreference('user-1')).toBe('unset');
     });
 
-    it('should not throw when clearing non-existent preference', () => {
-      expect(() => service.clearPreference('unknown-user')).not.toThrow();
+    it('should not throw when clearing non-existent preference', async () => {
+      await expect(service.clearPreference('unknown-user')).resolves.not.toThrow();
+    });
+  });
+
+  describe('persistence across restarts', () => {
+    it('should persist preferences to disk and reload on new instance', async () => {
+      await service.setPreference('user-1', 'billable');
+      await service.setPreference('user-2', 'non-billable');
+      await service.close();
+
+      // Create a new instance pointing to same DB
+      const service2 = new BillabilityPreferenceService(testDbPath);
+      await service2.initialize();
+
+      expect(await service2.getPreference('user-1')).toBe('billable');
+      expect(await service2.getPreference('user-2')).toBe('non-billable');
+      expect(await service2.getPreference('user-3')).toBe('unset');
+
+      await service2.close();
+    });
+
+    it('should persist clearPreference across restarts', async () => {
+      await service.setPreference('user-1', 'billable');
+      await service.clearPreference('user-1');
+      await service.close();
+
+      const service2 = new BillabilityPreferenceService(testDbPath);
+      await service2.initialize();
+
+      expect(await service2.getPreference('user-1')).toBe('unset');
+      await service2.close();
     });
   });
 
@@ -118,26 +163,26 @@ describe('BillabilityPreferenceService', () => {
   });
 
   describe('Integration: preference flow', () => {
-    it('should support the full preference lifecycle', () => {
+    it('should support the full preference lifecycle', async () => {
       const userId = 'lifecycle-user';
 
       // Initially unset
-      expect(service.getPreference(userId)).toBe('unset');
-      expect(service.hasPreference(userId)).toBe(false);
+      expect(await service.getPreference(userId)).toBe('unset');
+      expect(await service.hasPreference(userId)).toBe(false);
 
       // Set to billable
-      service.setPreference(userId, 'billable');
-      expect(service.getPreference(userId)).toBe('billable');
-      expect(service.hasPreference(userId)).toBe(true);
+      await service.setPreference(userId, 'billable');
+      expect(await service.getPreference(userId)).toBe('billable');
+      expect(await service.hasPreference(userId)).toBe(true);
 
       // Change to non-billable
-      service.setPreference(userId, 'non-billable');
-      expect(service.getPreference(userId)).toBe('non-billable');
+      await service.setPreference(userId, 'non-billable');
+      expect(await service.getPreference(userId)).toBe('non-billable');
 
       // Clear
-      service.clearPreference(userId);
-      expect(service.getPreference(userId)).toBe('unset');
-      expect(service.hasPreference(userId)).toBe(false);
+      await service.clearPreference(userId);
+      expect(await service.getPreference(userId)).toBe('unset');
+      expect(await service.hasPreference(userId)).toBe(false);
     });
   });
 });
