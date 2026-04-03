@@ -923,6 +923,119 @@ curl http://localhost:3978/metrics
 
 ---
 
+## Server Access
+
+### Production Server
+```bash
+ssh root@142.171.21.124
+```
+
+## Server Deployment
+
+### Server Overview
+
+| Property | Value |
+|----------|-------|
+| Host | `142.171.21.124` |
+| Domain | `https://spacewa.lk` |
+| App Location | `/opt/odoo-teams-bot/` |
+| Port | `3978` |
+| Process Manager | PM2 |
+| Service Name | `odoo-teams-bot` |
+
+### Server Directory Structure
+
+```
+/opt/odoo-teams-bot/
+├── src/                    # TypeScript source code
+├── dist/                   # Compiled JavaScript (production)
+├── dist.bak/               # Backup of previous build
+├── test/                   # Jest test suite
+├── teams-app/              # Microsoft Teams app package
+│   ├── manifest.json        # Teams app manifest
+│   ├── color.png           # App icon (32x32)
+│   └── outline.png          # App icon outline (32x32)
+├── data/                   # Runtime data directory
+│   ├── tokens.db            # SQLite token storage (encrypted)
+│   └── offline-queue.json   # Queued operations when Odoo unavailable
+├── logs/                    # Winston log files
+│   └── bot.log              # Daily rotating log (JSON format)
+├── node_modules/            # Dependencies
+├── package.json             # Project manifest
+├── .env                     # Environment variables (secrets)
+└── .git/                    # Git repository
+
+PM2 logs:
+├── /root/.pm2/logs/odoo-teams-bot-out.log     # stdout
+└── /root/.pm2/logs/odoo-teams-bot-error.log   # stderr
+```
+
+### PM2 Process Management
+
+```bash
+# View process status
+pm2 status
+
+# View logs
+pm2 logs odoo-teams-bot
+
+# Restart service
+pm2 restart odoo-teams-bot
+
+# Stop service
+pm2 stop odoo-teams-bot
+
+# Monitor in real-time
+pm2 monit
+```
+
+### Deployment Workflow
+
+1. **Development** (local):
+   ```bash
+   npm run dev        # Development with ts-node
+   npm run build      # Compile TypeScript
+   ```
+
+2. **Deploy to Production**:
+   ```bash
+   # On server:
+   cd /opt/odoo-teams-bot
+   git pull            # Pull latest from main branch
+   npm run build       # Compile TypeScript
+   pm2 restart odoo-teams-bot  # Restart service
+   ```
+
+3. **Health Verification**:
+   ```bash
+   curl https://spacewa.lk/health
+   # Returns: {"status":"healthy","timestamp":"...","authMode":"admin_proxy"}
+   ```
+
+### Key Server Paths
+
+| Purpose | Path |
+|---------|------|
+| App root | `/opt/odoo-teams-bot/` |
+| Logs | `/opt/odoo-teams-bot/logs/` |
+| PM2 logs | `/root/.pm2/logs/` |
+| Data | `/opt/odoo-teams-bot/data/` |
+| Dist (entry point) | `/opt/odoo-teams-bot/dist/index.js` |
+
+### Teams App Package
+
+The `teams-app/` directory contains the Microsoft Teams app manifest and icons:
+- `manifest.json` - Teams app configuration (app ID, permissions, etc.)
+- `color.png` - 32x32 color icon
+- `outline.png` - 32x32 outline icon
+
+To update the Teams app:
+1. Modify files in `teams-app/`
+2. Zip into `odoo-timesheet-bot.zip`
+3. Upload to Azure Bot Framework / Teams admin center
+
+---
+
 ## Changelog
 
 | Date | Change |
@@ -931,6 +1044,7 @@ curl http://localhost:3978/metrics
 | 2024-01 | Added admin_proxy mode documentation |
 | 2024-01 | Added resilience and offline queue |
 | 2024-01 | Added Fuse.js task filtering |
+| 2026-04-03 | Added server deployment documentation (paths, PM2, Teams app) |
 
 ---
 
