@@ -46,7 +46,7 @@ class OdooService {
   private apiKeyAuthService?: ApiKeyAuthService;
   private userMappingService?: UserMappingService;
   private isAdminProxyMode: boolean;
-  private timesheetBillabilityField?: 'billable' | 'x_is_billable' | null;
+  private timesheetBillabilityField?: 'billable' | null;
 
   constructor(
     odooConfig: OdooConfig,
@@ -183,8 +183,11 @@ class OdooService {
 
   /**
    * Detect which billability field is supported by account.analytic.line.
+   * Only uses the standard 'billable' field (selection type in Odoo 13+).
+   * Custom fields like 'x_is_billable' are avoided as they may be computed
+   * fields without store=True that can't be written to directly.
    */
-  private async getTimesheetBillabilityField(): Promise<'billable' | 'x_is_billable' | null> {
+  private async getTimesheetBillabilityField(): Promise<'billable' | null> {
     if (this.timesheetBillabilityField !== undefined) {
       return this.timesheetBillabilityField;
     }
@@ -196,17 +199,18 @@ class OdooService {
         [[], ['type', 'selection']]
       );
 
+      // Only use the standard 'billable' field - avoid custom x_ fields
+      // as they may be computed and not actually writable
       if (fieldMeta?.billable?.type === 'selection') {
         this.timesheetBillabilityField = 'billable';
         logger.info('Detected supported timesheet billability field', { field: 'billable' });
         return this.timesheetBillabilityField;
       }
 
-      if (fieldMeta?.x_is_billable?.type === 'boolean') {
-        this.timesheetBillabilityField = 'x_is_billable';
-        logger.info('Detected supported timesheet billability field', { field: 'x_is_billable' });
-        return this.timesheetBillabilityField;
-      }
+      // x_is_billable is a custom field that may exist in some Odoo installations
+      // but is often a computed field that cannot be written to.
+      // Skip it to avoid "Invalid field" errors during create.
+      logger.info('Standard billable field not found; billability mapping disabled');
     } catch (error) {
       logger.warn('Failed to detect timesheet billability field; proceeding without billability mapping', { error });
     }
@@ -635,8 +639,6 @@ class OdooService {
 
       if (billabilityField === 'billable') {
         timesheetParams.billable = entry.billable ? 'billable' : 'non_billable';
-      } else if (billabilityField === 'x_is_billable') {
-        timesheetParams.x_is_billable = entry.billable;
       } else {
         logger.warn('Billability requested but no supported writable field exists on account.analytic.line');
       }
@@ -670,10 +672,13 @@ class OdooService {
       logger.info('Creating new task in Odoo', { projectId, taskName });
 
       // Prepare task data
+      // Set user_id to false (unassigned) to avoid Odoo requiring the creating user
+      // to be a project team member. Tasks can be assigned later.
       const taskParams: any = {
         project_id: projectId,
         name: taskName,
-        active: true
+        active: true,
+        user_id: false  // false = unassigned task, avoids "Only project team members" error
       };
 
       // Add description if provided
