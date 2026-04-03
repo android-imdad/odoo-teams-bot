@@ -671,14 +671,14 @@ class OdooService {
     try {
       logger.info('Creating new task in Odoo', { projectId, taskName });
 
-      // Prepare task data
-      // Set user_id to false (unassigned) to avoid Odoo requiring the creating user
-      // to be a project team member. Tasks can be assigned later.
+      // Prepare task data — only set project_id, name, and active.
+      // Do NOT set user_id or user_ids: Odoo 18+ renamed user_id to user_ids
+      // (many2many), and setting either can trigger "Only project team members"
+      // or "Invalid field" errors. Omitting it creates an unassigned task.
       const taskParams: any = {
         project_id: projectId,
         name: taskName,
-        active: true,
-        user_id: false  // false = unassigned task, avoids "Only project team members" error
+        active: true
       };
 
       // Add description if provided
