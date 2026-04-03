@@ -46,6 +46,7 @@ class OdooService {
   private apiKeyAuthService?: ApiKeyAuthService;
   private userMappingService?: UserMappingService;
   private isAdminProxyMode: boolean;
+  private timesheetBillabilityField?: 'billable' | 'x_is_billable' | null;
 
   constructor(
     odooConfig: OdooConfig,
@@ -179,6 +180,40 @@ class OdooService {
     });
   }
 
+
+  /**
+   * Detect which billability field is supported by account.analytic.line.
+   */
+  private async getTimesheetBillabilityField(): Promise<'billable' | 'x_is_billable' | null> {
+    if (this.timesheetBillabilityField !== undefined) {
+      return this.timesheetBillabilityField;
+    }
+
+    try {
+      const fieldMeta = await this.executeKw(
+        'account.analytic.line',
+        'fields_get',
+        [[], ['type', 'selection']]
+      );
+
+      if (fieldMeta?.billable?.type === 'selection') {
+        this.timesheetBillabilityField = 'billable';
+        logger.info('Detected supported timesheet billability field', { field: 'billable' });
+        return this.timesheetBillabilityField;
+      }
+
+      if (fieldMeta?.x_is_billable?.type === 'boolean') {
+        this.timesheetBillabilityField = 'x_is_billable';
+        logger.info('Detected supported timesheet billability field', { field: 'x_is_billable' });
+        return this.timesheetBillabilityField;
+      }
+    } catch (error) {
+      logger.warn('Failed to detect timesheet billability field; proceeding without billability mapping', { error });
+    }
+
+    this.timesheetBillabilityField = null;
+    return this.timesheetBillabilityField;
+  }
   /**
    * Get all active projects with caching
    */
@@ -594,14 +629,17 @@ class OdooService {
       timesheetParams.task_id = entry.task_id;
     }
 
-    // Include billability if explicitly set
-    // In Odoo, the 'is_so_line' or 'non_allow_billable' field controls billability,
-    // but the most common approach is using 'timesheet_invoice_type' or 'so_line'.
-    // For maximum compatibility, we set the 'x_billable' custom field if it exists,
-    // or fall back to the standard encoding via task/project configuration.
-    // The safest approach: set a boolean custom field 'x_is_billable' on account.analytic.line
+    // Include billability if explicitly set and supported by this Odoo instance.
     if (entry.billable !== undefined) {
-      timesheetParams.x_is_billable = entry.billable;
+      const billabilityField = await this.getTimesheetBillabilityField();
+
+      if (billabilityField === 'billable') {
+        timesheetParams.billable = entry.billable ? 'billable' : 'non_billable';
+      } else if (billabilityField === 'x_is_billable') {
+        timesheetParams.x_is_billable = entry.billable;
+      } else {
+        logger.warn('Billability requested but no supported writable field exists on account.analytic.line');
+      }
     }
 
     // Create the timesheet entry with appropriate authentication

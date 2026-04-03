@@ -504,8 +504,73 @@ describe('OdooService', () => {
       const zeroHoursEntry = { ...mockTimesheetEntry, hours: 0 };
       await odooService.logTime(zeroHoursEntry);
     });
-  });
 
+    it('should map billable=true to Odoo billable selection when supported', async () => {
+      mockCommonClient.methodCall.mockImplementation((_method: any, _params: any, callback: any) => {
+        callback(null, 123);
+      });
+
+      const calls: any[] = [];
+      mockObjectClient.methodCall.mockImplementation((_method: any, params: any, callback: any) => {
+        calls.push(params);
+        if (params[4] === 'fields_get') {
+          callback(null, { billable: { type: 'selection' } });
+        } else if (params[4] === 'create') {
+          callback(null, 456);
+        }
+      });
+
+      await odooService.logTime({ ...mockTimesheetEntry, billable: true });
+
+      const createCall = calls.find((p: any) => p[4] === 'create');
+      expect(createCall[5][0].billable).toBe('billable');
+      expect(createCall[5][0].x_is_billable).toBeUndefined();
+    });
+
+    it('should map billable=false to Odoo non_billable selection when supported', async () => {
+      mockCommonClient.methodCall.mockImplementation((_method: any, _params: any, callback: any) => {
+        callback(null, 123);
+      });
+
+      const calls: any[] = [];
+      mockObjectClient.methodCall.mockImplementation((_method: any, params: any, callback: any) => {
+        calls.push(params);
+        if (params[4] === 'fields_get') {
+          callback(null, { billable: { type: 'selection' } });
+        } else if (params[4] === 'create') {
+          callback(null, 456);
+        }
+      });
+
+      await odooService.logTime({ ...mockTimesheetEntry, billable: false });
+
+      const createCall = calls.find((p: any) => p[4] === 'create');
+      expect(createCall[5][0].billable).toBe('non_billable');
+      expect(createCall[5][0].x_is_billable).toBeUndefined();
+    });
+
+    it('should omit billability fields when no supported writable field exists', async () => {
+      mockCommonClient.methodCall.mockImplementation((_method: any, _params: any, callback: any) => {
+        callback(null, 123);
+      });
+
+      const calls: any[] = [];
+      mockObjectClient.methodCall.mockImplementation((_method: any, params: any, callback: any) => {
+        calls.push(params);
+        if (params[4] === 'fields_get') {
+          callback(null, {});
+        } else if (params[4] === 'create') {
+          callback(null, 456);
+        }
+      });
+
+      await odooService.logTime({ ...mockTimesheetEntry, billable: true });
+
+      const createCall = calls.find((p: any) => p[4] === 'create');
+      expect(createCall[5][0].billable).toBeUndefined();
+      expect(createCall[5][0].x_is_billable).toBeUndefined();
+    });
+  });
   describe('clearCache', () => {
     it('should clear the project cache', () => {
       const cache = (odooService as any).projectCache;
