@@ -672,13 +672,16 @@ class OdooService {
       logger.info('Creating new task in Odoo', { projectId, taskName });
 
       // Prepare task data — only set project_id, name, and active.
-      // Do NOT set user_id or user_ids: Odoo 18+ renamed user_id to user_ids
-      // (many2many), and setting either can trigger "Only project team members"
-      // or "Invalid field" errors. Omitting it creates an unassigned task.
+      // Explicitly set user_ids to empty to prevent Odoo from auto-assigning
+      // the creating user as the assignee, which triggers "Only project team
+      // members can be assigned" errors when the admin isn't a project member.
+      // Odoo 18+ uses user_ids (many2many); older versions use user_id (many2one).
+      // We try user_ids first, and fall back without it if the field doesn't exist.
       const taskParams: any = {
         project_id: projectId,
         name: taskName,
-        active: true
+        active: true,
+        user_ids: [[5, 0, 0]]  // Command 5 = unlink all (clear assignees)
       };
 
       // Add description if provided
@@ -686,12 +689,30 @@ class OdooService {
         taskParams.description = description;
       }
 
-      // Create the task
-      const taskId = await this.executeKw(
-        'project.task',
-        'create',
-        [taskParams]
-      );
+      // Create the task, with fallback for Odoo versions that don't have user_ids
+      let taskId: number;
+      try {
+        taskId = await this.executeKw(
+          'project.task',
+          'create',
+          [taskParams]
+        );
+      } catch (firstError: any) {
+        const errMsg = String(firstError.message || firstError);
+        if (errMsg.includes("Invalid field 'user_ids'") || errMsg.includes("Invalid field") && errMsg.includes("user_ids")) {
+          // Older Odoo without user_ids -- try with user_id: false instead
+          logger.info('user_ids not available, retrying task creation with user_id: false');
+          delete taskParams.user_ids;
+          taskParams.user_id = false;
+          taskId = await this.executeKw(
+            'project.task',
+            'create',
+            [taskParams]
+          );
+        } else {
+          throw firstError;
+        }
+      }
 
       logger.info('Task created successfully', {
         taskId,
