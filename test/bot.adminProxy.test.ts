@@ -389,6 +389,12 @@ describe('TimesheetBot - Admin Proxy Mode', () => {
 
       mockOdooService.createTask.mockResolvedValue(999);
       mockOdooService.logTime.mockResolvedValue(12345);
+      mockOdooService.lookupUserByEmail.mockResolvedValue({
+        id: 42,
+        login: 'john.doe@company.com',
+        name: 'John Doe',
+        email: 'john.doe@company.com'
+      });
 
       await (bot as any).handleSaveTimesheet(
         mockContext as TurnContext,
@@ -399,7 +405,8 @@ describe('TimesheetBot - Admin Proxy Mode', () => {
       expect(mockOdooService.createTask).toHaveBeenCalledWith(
         1,
         'New Homepage Design',
-        'Worked on new feature'
+        'Worked on new feature',
+        42
       );
 
       expect(mockOdooService.logTime).toHaveBeenCalledWith(

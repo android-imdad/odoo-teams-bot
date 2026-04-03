@@ -667,22 +667,24 @@ class OdooService {
   /**
    * Create a new task in Odoo
    */
-  async createTask(projectId: number, taskName: string, description?: string): Promise<number> {
+  async createTask(projectId: number, taskName: string, description?: string, assigneeUserId?: number): Promise<number> {
     try {
-      logger.info('Creating new task in Odoo', { projectId, taskName });
+      logger.info('Creating new task in Odoo', { projectId, taskName, assigneeUserId });
 
-      // Prepare task data — only set project_id, name, and active.
-      // Explicitly set user_ids to empty to prevent Odoo from auto-assigning
-      // the creating user as the assignee, which triggers "Only project team
-      // members can be assigned" errors when the admin isn't a project member.
-      // Odoo 18+ uses user_ids (many2many); older versions use user_id (many2one).
-      // We try user_ids first, and fall back without it if the field doesn't exist.
       const taskParams: any = {
         project_id: projectId,
         name: taskName,
-        active: true,
-        user_ids: [[5, 0, 0]]  // Command 5 = unlink all (clear assignees)
+        active: true
       };
+
+      // Assign the task to the requesting user if provided.
+      // Odoo 18+ uses user_ids (many2many); older versions use user_id (many2one).
+      // If no assignee, explicitly clear to prevent Odoo auto-assigning the admin.
+      if (assigneeUserId) {
+        taskParams.user_ids = [[4, assigneeUserId, 0]];  // Command 4 = link
+      } else {
+        taskParams.user_ids = [[5, 0, 0]];  // Command 5 = unlink all
+      }
 
       // Add description if provided
       if (description) {
@@ -700,10 +702,10 @@ class OdooService {
       } catch (firstError: any) {
         const errMsg = String(firstError.message || firstError);
         if (errMsg.includes("Invalid field 'user_ids'") || errMsg.includes("Invalid field") && errMsg.includes("user_ids")) {
-          // Older Odoo without user_ids -- try with user_id: false instead
-          logger.info('user_ids not available, retrying task creation with user_id: false');
+          // Older Odoo without user_ids -- fall back to user_id (many2one)
+          logger.info('user_ids not available, retrying task creation with user_id');
           delete taskParams.user_ids;
-          taskParams.user_id = false;
+          taskParams.user_id = assigneeUserId || false;
           taskId = await this.executeKw(
             'project.task',
             'create',

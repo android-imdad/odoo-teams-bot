@@ -396,7 +396,8 @@ describe('TimesheetBot', () => {
       expect(mockOdooService.createTask).toHaveBeenCalledWith(
         1,
         'New Task',
-        'Test work'
+        'Test work',
+        undefined
       );
       expect(mockOdooService.logTime).toHaveBeenCalledWith(
         expect.objectContaining({

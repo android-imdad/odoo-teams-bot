@@ -769,10 +769,25 @@ export class TimesheetBot extends TeamsActivityHandler {
         });
 
         try {
+          // In admin proxy mode, look up the requesting user's Odoo ID
+          // so the task is assigned to them instead of the admin account
+          let assigneeUserId: number | undefined;
+          if (this.isAdminProxyMode && teamsEmail) {
+            try {
+              const odooUser = await this.odooService.lookupUserByEmail(teamsEmail);
+              if (odooUser) {
+                assigneeUserId = odooUser.id;
+              }
+            } catch (lookupError) {
+              logger.warn('Could not look up user for task assignment, creating unassigned', { lookupError });
+            }
+          }
+
           const newTaskId = await this.odooService.createTask(
             data.project_id,
             data.new_task_name,
-            data.description
+            data.description,
+            assigneeUserId
           );
 
           taskId = newTaskId;
