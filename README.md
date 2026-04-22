@@ -8,17 +8,19 @@ A Microsoft Teams bot that uses AI to parse natural language timesheet entries a
 - **Interactive Confirmation**: Adaptive Cards provide visual confirmation before saving
 - **Automatic Project & Task Matching**: Intelligently matches project names and task names from your Odoo instance using fuzzy search
 - **Smart Task Filtering**: Fuse.js filters thousands of tasks to the top 5 matches before AI parsing - reduces token usage by 99%+
+- **Billability Support**: Set per-user default billability preferences; supports both standard `billable` field and custom `x_is_billable` boolean field
 - **Flexible Input**: Supports various date and hour formats
 - **Comprehensive Logging**: Advanced Winston-based logging with file rotation
 - **Docker Ready**: Containerized deployment for easy setup and scaling
 - **Multiple Authentication Modes**: Support for API Key, OAuth, Service Account, and Admin Proxy modes
+- **Security Hardened**: STRIDE threat model remediation including rate limiting, PKCE for OAuth, HMAC-signed management routes, and audit trail integrity
 
 ## Prerequisites
 
 - Node.js v20 or higher
 - Docker and Docker Compose (for containerized deployment)
 - Microsoft Teams Bot registration (Bot ID and Password)
-- Odoo instance (versions 13-15) with XML-RPC enabled
+- Odoo instance (versions 13-18) with XML-RPC enabled
 - Google Gemini API key
 
 ## Installation
@@ -133,6 +135,11 @@ The bot will:
 - "2024-12-25"
 - "December 25th"
 
+**Billability:**
+- "billable" or "non-billable" (or "not billable")
+- If not specified, uses your per-user default preference
+- Falls back to Odoo's project/task default if no preference set
+
 **Projects:**
 - Match by name: "project SSI"
 - Match by code: "SSI" (if project has code in Odoo)
@@ -156,27 +163,40 @@ I worked 6.5 hours on project Mobile App today fixing bugs
 
 ```
 src/
-├── index.ts              # Entry point & HTTP server
-├── bot.ts                # Main bot logic
+├── index.ts                  # Entry point & HTTP server
+├── bot.ts                    # Main bot logic
 ├── config/
-│   ├── config.ts         # Configuration management
-│   └── logger.ts         # Winston logging setup
+│   ├── config.ts             # Configuration management
+│   ├── configValidation.ts   # Schema-based config validation
+│   └── logger.ts             # Winston logging setup
 ├── services/
-│   ├── odoo.ts           # Odoo XML-RPC integration
-│   ├── parser.ts         # Gemini AI parsing
-│   ├── cache.ts          # In-memory caching
-│   └── taskFilter.ts     # Fuse.js fuzzy task filtering
+│   ├── odoo.ts               # Odoo XML-RPC integration
+│   ├── parser.ts             # Gemini AI parsing
+│   ├── cache.ts              # In-memory caching (LRU with size limits)
+│   ├── taskFilter.ts         # Fuse.js fuzzy task filtering
+│   ├── billabilityPreference.ts # Per-user billability defaults
+│   ├── userMapping.ts        # Teams email → Odoo user ID mapping
+│   ├── audit.ts              # Audit trail with hash chain integrity
+│   ├── health.ts             # Health checks & Prometheus metrics
+│   └── resilience.ts         # Offline queue with HMAC integrity
 ├── cards/
-│   └── timesheetCard.ts  # Adaptive Card generators
-├── types/                # TypeScript type definitions
+│   └── timesheetCard.ts      # Adaptive Card generators
+├── middleware/
+│   ├── errorHandler.ts       # Error handling utilities
+│   ├── errorRecovery.ts      # Error classification & recovery
+│   └── rateLimit.ts          # Per-user rate limiting
+├── routes/
+│   └── oauth.ts              # OAuth callback routes
+├── types/                    # TypeScript type definitions
 │   ├── index.ts
 │   ├── odoo.types.ts
-│   └── bot.types.ts
-├── middleware/
-│   └── errorHandler.ts   # Error handling utilities
-└── utils/                # Utility functions
+│   ├── bot.types.ts
+│   └── oauth.types.ts
+└── utils/                     # Utility functions
     ├── validation.ts
-    └── formatting.ts
+    ├── formatting.ts
+    ├── sanitization.ts       # XSS/SQL injection prevention
+    └── retry.ts              # Exponential backoff retry
 ```
 
 ## Technical Flow
@@ -436,6 +456,7 @@ src/
 |----------|-------------|----------|---------|
 | BOT_ID | Microsoft Bot ID | Yes | - |
 | BOT_PASSWORD | Microsoft Bot Password | Yes (unless using Managed Identity) | - |
+| BOT_TENANT_ID | Azure Tenant ID for single-tenant bots | No | - |
 | AZURE_USE_MANAGED_IDENTITY | Use Azure Managed Identity | No | false |
 | AZURE_CLIENT_ID | Managed Identity Client ID | For User-Assigned MI| - |
 | AZURE_TENANT_ID | Azure Tenant ID | No | - |
@@ -446,7 +467,7 @@ src/
 | ODOO_PASSWORD | Odoo admin password | For admin_proxy/service_account | - |
 | AUTH_MODE | Authentication mode | No | api_key |
 | GEMINI_API_KEY | Google Gemini API key | Yes | - |
-| GEMINI_MODEL | Gemini model name | No | gemini-3-flash-preview |
+| GEMINI_MODEL | Gemini model name | No | gemini-3.1-flash-lite-preview |
 | PROJECT_CACHE_TTL | Project cache duration (ms) | No | 3600000 (1 hour) |
 | LOG_LEVEL | Logging level | No | info |
 | LOG_FILE | Log file path | No | logs/bot.log |
@@ -512,6 +533,7 @@ Best for enterprise environments where IT manages Odoo access centrally.
 - When a user sends a timesheet entry, the bot extracts their email from Teams
 - The bot looks up the user's Odoo account by matching the email in `res.users`
 - Timesheets are logged using the admin account but attributed to the matched user
+- Users can set a **default billability preference** (billable/non-billable) that persists across sessions
 
 **Setup:**
 ```env
@@ -542,7 +564,7 @@ Best for self-hosted Odoo with OAuth provider configured.
 ### Odoo Configuration
 
 The bot requires:
-- Odoo versions 13, 14, or 15
+- Odoo versions 13 through 18
 - XML-RPC enabled
 - User with timesheet creation permissions
 - Access to `project.project` and `account.analytic.line` models
@@ -551,6 +573,10 @@ The bot requires:
 - Read access to projects
 - Create access to timesheet entries (account.analytic.line)
 - For admin_proxy mode: Read access to `res.users` model (for email lookup)
+
+**Billability Field Support:**
+- Odoo 15+: Uses standard `billable` selection field
+- Custom implementations: May use `x_is_billable` boolean field (auto-detected)
 
 ## Logging
 
@@ -725,6 +751,21 @@ The project uses TypeScript strict mode with the following checks:
 - **Validate all inputs** before processing
 - **Use HTTPS** for Odoo and Gemini API connections
 - **Sanitize logs** to avoid leaking sensitive data
+- **Enable rate limiting** on bot endpoints (built-in, configurable)
+- **Use TOKEN_ENCRYPTION_KEY** for api_key and oauth modes (32+ character key required)
+
+### Security Features
+
+The bot implements comprehensive STRIDE threat model remediation:
+
+| Threat | Mitigation |
+|--------|------------|
+| **Spoofing** | HMAC-signed OAuth management routes; PKCE for OAuth flows |
+| **Tampering** | SHA-256 hash chain for audit logs; HMAC integrity for offline queue |
+| **Repudiation** | Comprehensive JSONL audit trail with hash chaining |
+| **Information Disclosure** | Email hashing in logs; sensitive data redaction; prompt injection detection |
+| **Denial of Service** | Per-user rate limiting; cache size limits; Gemini timeout (30s) |
+| **Elevation of Privilege** | Minimum permissions documented; service_account blocked in production |
 
 ## Maintenance
 

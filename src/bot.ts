@@ -340,7 +340,9 @@ export class TimesheetBot extends TeamsActivityHandler {
       } else {
         // AI didn't detect explicit billability — use user's default preference
         const userPref = await this.billabilityService.getPreference(teamsUserId);
-        billable = BillabilityPreferenceService.toBillableBoolean(userPref);
+        const prefBool = BillabilityPreferenceService.toBillableBoolean(userPref);
+        // Default to billable when no preference is set
+        billable = prefBool !== undefined ? prefBool : true;
       }
 
       // Create confirmation card

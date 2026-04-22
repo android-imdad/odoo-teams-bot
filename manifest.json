@@ -1,0 +1,45 @@
+     {
+       "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
+       "manifestVersion": "1.17",
+       "version": "1.0.0",
+       "id": "e0ac9355-10da-4bff-a0dc-f9fd122b8729",
+       "developer": {
+         "name": "Imdad Ismail - Allion Technologies",
+         "websiteUrl": "https://www.alliontechnologies.com/",
+         "privacyUrl": "https://www.alliontechnologies.com/privacy-policy",
+         "termsOfUseUrl": "https://www.alliontechnologies.com/privacy-policy"
+       },
+       "name": {
+         "short": "Timesheet Bot",
+         "full": "Odoo Timesheet Bot"
+       },
+       "description": {
+         "short": "Log timesheets to Odoo via natural language",
+         "full": "AI-powered Teams bot that parses natural language timesheet entries and logs them to Odoo ERP."
+       },
+       "icons": {
+         "outline": "outline.png",
+         "color": "color.png"
+       },
+       "accentColor": "#714B67",
+       "bots": [
+         {
+           "botId": "e0ac9355-10da-4bff-a0dc-f9fd122b8729",
+           "scopes": ["personal", "team", "groupChat"],
+           "supportsFiles": false,
+           "isNotificationOnly": false,
+           "commandLists": [
+             {
+               "scopes": ["personal"],
+               "commands": [
+                 { "title": "help", "description": "Show available commands" },
+                 { "title": "status", "description": "Check connection status" },
+                 { "title": "projects", "description": "List available projects" }
+               ]
+             }
+           ]
+         }
+       ],
+       "permissions": ["identity", "messageTeamMembers"],
+       "validDomains": ["spacewa.lk"]
+     }
