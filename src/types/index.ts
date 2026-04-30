@@ -17,6 +17,7 @@ export interface ParsedTimesheetData {
   task_name: string | null;
   hours: number | null;
   date: string | null;
+  dates?: string[] | null; // Multiple dates support
   description: string;
   confidence: number;
   error?: string;

@@ -67,10 +67,13 @@ export class TimesheetCardGenerator {
               title: 'Hours:',
               value: `${data.hours} hours`
             },
-            {
+            ...(data.dates && data.dates.length > 1 ? [{
+              title: 'Dates:',
+              value: data.dates.map(d => this.formatDate(d)).join(', ')
+            }] : [{
               title: 'Date:',
               value: this.formatDate(data.date)
-            },
+            }]),
             {
               title: 'Billable:',
               value: this.getBillabilityLabel(data.billable)
@@ -125,7 +128,9 @@ export class TimesheetCardGenerator {
               type: 'TextBlock',
               text: data.create_new_task
                 ? 'Your timesheet has been saved to Odoo. A new task was created.'
-                : 'Your timesheet has been saved to Odoo.',
+                : data.dates && data.dates.length > 1
+                  ? `Your ${data.dates.length} timesheet entries have been saved to Odoo.`
+                  : 'Your timesheet has been saved to Odoo.',
               wrap: true,
               spacing: 'Small',
               isSubtle: true
@@ -147,10 +152,13 @@ export class TimesheetCardGenerator {
               title: 'Hours:',
               value: `${data.hours} hours`
             },
-            {
+            ...(data.dates && data.dates.length > 1 ? [{
+              title: 'Dates:',
+              value: data.dates.map(d => this.formatDate(d)).join(', ')
+            }] : [{
               title: 'Date:',
               value: this.formatDate(data.date)
-            },
+            }]),
             {
               title: 'Billable:',
               value: this.getBillabilityLabel(data.billable)

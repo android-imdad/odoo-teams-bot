@@ -13,6 +13,7 @@ export interface TimesheetCardData {
   new_task_name?: string;
   hours: number;
   date: string;
+  dates?: string[]; // Multiple dates support
   description: string;
   billable?: boolean; // true = billable, false = non-billable, undefined = not set
 }
