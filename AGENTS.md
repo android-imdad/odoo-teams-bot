@@ -923,20 +923,12 @@ curl http://localhost:3978/metrics
 
 ---
 
-## Server Access
-
-### Production Server
-```bash
-ssh root@142.171.21.124
-```
-
 ## Server Deployment
 
 ### Server Overview
 
 | Property | Value |
 |----------|-------|
-| Host | `142.171.21.124` |
 | Domain | `https://spacewa.lk` |
 | App Location | `/opt/odoo-teams-bot/` |
 | Port | `3978` |
