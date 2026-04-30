@@ -355,14 +355,18 @@ export class TimesheetBot extends TeamsActivityHandler {
         new_task_name: parsed.new_task_name || undefined,
         hours: parsed.hours,
         date: parsed.date,
+        dates: parsed.dates && parsed.dates.length > 1 ? parsed.dates : undefined,
         description: parsed.description,
         billable
       };
 
       const billableLabel = BillabilityPreferenceService.getLabel(cardData.billable);
+      const dateDisplay = cardData.dates && cardData.dates.length > 1
+        ? cardData.dates.join(', ')
+        : cardData.date;
       const confirmCard = TimesheetCardGenerator.createConfirmationCard(cardData);
       await context.sendActivity({
-        text: `Please confirm your timesheet:\n\nProject: ${cardData.project_name}\nTask: ${cardData.task_name || 'None'}\nHours: ${cardData.hours}\nDate: ${cardData.date}\nBillable: ${billableLabel}\nDescription: ${cardData.description}`,
+        text: `Please confirm your timesheet:\n\nProject: ${cardData.project_name}\nTask: ${cardData.task_name || 'None'}\nHours: ${cardData.hours}\nDate: ${dateDisplay}\nBillable: ${billableLabel}\nDescription: ${cardData.description}`,
         attachments: [confirmCard]
       });
 
@@ -810,29 +814,34 @@ export class TimesheetBot extends TeamsActivityHandler {
         }
       }
 
-      // Create timesheet entry
-      const entry: TimesheetEntry = {
-        project_id: data.project_id,
-        project_name: data.project_name,
-        task_id: taskId,
-        task_name: taskName,
-        hours: data.hours,
-        date: data.date,
-        description: data.description,
-        billable: data.billable
-      };
+      // Determine which dates to log — use dates array if multiple, else single date
+      const datesToLog = data.dates && data.dates.length > 0 ? data.dates : [data.date];
 
-      // Create timesheet in Odoo
-      // For admin proxy mode, pass the email; otherwise pass the userId
-      let timesheetId: number;
-      if (this.isAdminProxyMode && teamsEmail) {
-        timesheetId = await this.odooService.logTime(entry, undefined, teamsEmail);
-      } else {
-        timesheetId = await this.odooService.logTime(entry, teamsUserId);
+      const timesheetIds: number[] = [];
+      for (const entryDate of datesToLog) {
+        const entry: TimesheetEntry = {
+          project_id: data.project_id,
+          project_name: data.project_name,
+          task_id: taskId,
+          task_name: taskName,
+          hours: data.hours,
+          date: entryDate,
+          description: data.description,
+          billable: data.billable
+        };
+
+        let timesheetId: number;
+        if (this.isAdminProxyMode && teamsEmail) {
+          timesheetId = await this.odooService.logTime(entry, undefined, teamsEmail);
+        } else {
+          timesheetId = await this.odooService.logTime(entry, teamsUserId);
+        }
+        timesheetIds.push(timesheetId);
       }
 
-      logger.info('Timesheet saved successfully', {
-        timesheetId,
+      logger.info('Timesheet(s) saved successfully', {
+        timesheetIds,
+        count: timesheetIds.length,
         userId: teamsUserId,
         emailHash: hashEmail(teamsEmail)
       });

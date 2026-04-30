@@ -67,8 +67,9 @@ OUTPUT SCHEMA (strict JSON, no additional text):
   "task_name": "<string or null>",
   "create_new_task": <true or false>,
   "new_task_name": "<string or null>",
-  "hours": <positive number or null>,
-  "date": "<YYYY-MM-DD or null>",
+  "hours": <positive decimal number or null>,
+  "date": "<YYYY-MM-DD or null - first date if multiple>",
+  "dates": ["<YYYY-MM-DD>", ...],
   "description": "<string>",
   "confidence": <number between 0-1>,
   "billable": <true, false, or null>
@@ -147,8 +148,8 @@ Parsing rules:
 2. Check if user wants to create a NEW task (look for phrases like "create task", "new task", "add task")
 3. If creating a new task, extract the new task name from the user's input
 4. If NOT creating a new task, try to identify an existing task from the available tasks list
-5. Extract the number of hours worked (support formats: "4 hours", "4h", "4.5 hours", etc.)
-6. Determine the date (if not mentioned, use today: ${today}). Support formats like "yesterday", "last Friday", specific dates
+5. Extract the number of hours worked. Supported formats: "4 hours", "4h", "4.5 hours", "4.5h". Also support "H:MM" format where "7:45" means 7 hours and 45 minutes — convert to decimal (e.g., 7:45 → 7.75). Always return hours as a decimal number.
+6. Extract ALL dates mentioned. If multiple days are mentioned (e.g., "Monday, Tuesday and Wednesday", "last 3 days"), extract each as YYYY-MM-DD and put all in the "dates" array. Set "date" to the first date. If only one date mentioned, "dates" should contain just that one date. If no date mentioned, use today (${today}) for both "date" and "dates".
 7. Extract the work description/task details
 8. If project cannot be identified with certainty, set project_id and project_name to null
 9. If create_new_task is true, set task_id and task_name to null
@@ -246,13 +247,31 @@ Parsing rules:
       taskName = null;
     }
 
+    // Parse hours — accept number or "H:MM" string fallback
+    const hoursRaw = (data as any).hours;
+    let hours: number | null = null;
+    if (typeof hoursRaw === 'number' && hoursRaw > 0) {
+      hours = hoursRaw;
+    } else if (typeof hoursRaw === 'string') {
+      hours = this.parseHoursString(hoursRaw);
+    }
+
+    // Validate the dates array; fall back to single date field
+    const rawDates: unknown[] = Array.isArray((data as any).dates) ? (data as any).dates : [];
+    const validDates = rawDates
+      .map(d => this.validateDate(typeof d === 'string' ? d : null))
+      .filter((d): d is string => d !== null);
+    const dates: string[] | null = validDates.length > 0 ? validDates : null;
+    const date = dates ? dates[0] : this.validateDate(data.date);
+
     const validated: ParsedTimesheetData = {
       project_id: projectId,
       project_name: projectName,
       task_id: taskId,
       task_name: taskName,
-      hours: typeof data.hours === 'number' && data.hours > 0 ? data.hours : null,
-      date: this.validateDate(data.date),
+      hours,
+      date,
+      dates,
       description: data.description || originalText,
       confidence: typeof data.confidence === 'number'
         ? Math.max(0, Math.min(1, data.confidence))
@@ -272,6 +291,24 @@ Parsing rules:
     }
 
     return validated;
+  }
+
+  /**
+   * Parse hours from a string value — handles "H:MM" format (e.g., "7:45" → 7.75)
+   * and plain numeric strings.
+   */
+  private parseHoursString(str: string): number | null {
+    const colonMatch = str.match(/^(\d+):(\d{2})$/);
+    if (colonMatch) {
+      const h = parseInt(colonMatch[1], 10);
+      const m = parseInt(colonMatch[2], 10);
+      if (m >= 0 && m < 60) {
+        const total = h + m / 60;
+        return total > 0 ? Math.round(total * 1000) / 1000 : null;
+      }
+    }
+    const num = parseFloat(str);
+    return !isNaN(num) && num > 0 ? num : null;
   }
 
   /**
