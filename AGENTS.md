@@ -929,7 +929,6 @@ curl http://localhost:3978/metrics
 
 | Property | Value |
 |----------|-------|
-| Domain | `https://spacewa.lk` |
 | App Location | `/opt/odoo-teams-bot/` |
 | Port | `3978` |
 | Process Manager | PM2 |
@@ -1000,7 +999,7 @@ pm2 monit
 
 3. **Health Verification**:
    ```bash
-   curl https://spacewa.lk/health
+   curl http://localhost:3978/health
    # Returns: {"status":"healthy","timestamp":"...","authMode":"admin_proxy"}
    ```
 
