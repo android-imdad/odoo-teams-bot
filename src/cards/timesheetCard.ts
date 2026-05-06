@@ -456,6 +456,14 @@ export class TimesheetCardGenerator {
               spacing: 'Small',
               fontType: 'Monospace',
               size: 'Small'
+            },
+            {
+              type: 'TextBlock',
+              text: '• "3h on Website project Monday to Wednesday testing checkout"',
+              wrap: true,
+              spacing: 'Small',
+              fontType: 'Monospace',
+              size: 'Small'
             }
           ]
         },
