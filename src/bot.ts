@@ -864,17 +864,18 @@ export class TimesheetBot extends TeamsActivityHandler {
 
       // If some dates failed, notify the user about partial success
       if (failedDates.length > 0) {
-        const partialMsg = timesheetIds.length > 0
-          ? `Saved ${timesheetIds.length} of ${datesToLog.length} timesheet entries. Failed for date(s): ${failedDates.join(', ')}. Please retry those dates individually.`
-          : `Failed to save timesheet entries for all date(s): ${failedDates.join(', ')}.`;
-        await context.sendActivity(partialMsg);
+        await context.sendActivity(
+          `Saved ${timesheetIds.length} of ${datesToLog.length} timesheet entries. Failed for date(s): ${failedDates.join(', ')}. Please retry those dates individually.`
+        );
       }
 
-      // Update data with the new task info for the confirmed card
+      // Update data with the new task info for the confirmed card.
+      // Exclude failed dates so the card count reflects only what was saved.
       const confirmedData: TimesheetCardData = {
         ...data,
         task_id: taskId,
-        task_name: taskName
+        task_name: taskName,
+        dates: data.dates?.filter(d => !failedDates.includes(d)),
       };
 
       // Update the original card to show confirmed state (removes buttons)
