@@ -6,7 +6,7 @@ import {
 import { logger } from './config/logger';
 import { config } from './config/config';
 import { OdooService } from './services/odoo';
-import { parserService } from './services/parser';
+import { MAX_DATES, parserService } from './services/parser';
 import { filterTasksByQuery } from './services/taskFilter';
 import { TimesheetCardGenerator } from './cards/timesheetCard';
 import { createAuthCard, createReauthCard, createConnectionStatusCard, buildAuthUrl, createApiKeyInputCard, createApiKeySuccessCard, createAuthOptionsCard } from './cards/authCard';
@@ -14,7 +14,7 @@ import { TimesheetCardData } from './types/bot.types';
 import { TimesheetEntry, AuthRequiredError } from './types';
 import { OAuthService } from './services/oauth';
 import { ApiKeyAuthService } from './services/apiKeyAuth';
-import { sanitizeTimesheetInput } from './utils/sanitization';
+import { sanitizeDate, sanitizeTimesheetInput } from './utils/sanitization';
 import { Validator } from './utils/validation';
 import { BillabilityPreferenceService } from './services/billabilityPreference';
 import crypto from 'crypto';
@@ -762,6 +762,17 @@ export class TimesheetBot extends TeamsActivityHandler {
         description: sanitized.description || data.description
       };
 
+      const normalizedDates = this.normalizeSubmittedDates(data);
+      if (!normalizedDates.valid) {
+        logger.warn('Invalid submitted timesheet dates', { error: normalizedDates.error, teamsUserId });
+        const errorCard = TimesheetCardGenerator.createErrorCard(
+          `Invalid timesheet data: ${normalizedDates.error}`
+        );
+        await context.sendActivity({ attachments: [errorCard] });
+        return;
+      }
+      const datesToLog = normalizedDates.dates;
+
       logger.info('Saving timesheet to Odoo', { projectId: data.project_id, hours: data.hours, date: data.date, teamsUserId, emailHash: hashEmail(teamsEmail) });
 
       let taskId = data.task_id;
@@ -814,11 +825,9 @@ export class TimesheetBot extends TeamsActivityHandler {
         }
       }
 
-      // Determine which dates to log — use dates array if present, else single date
-      const datesToLog = (data.dates && data.dates.length > 0) ? data.dates : [data.date];
-
       const timesheetIds: number[] = [];
       const failedDates: string[] = [];
+      const savedDates: string[] = [];
       let lastError: Error | null = null;
 
       for (const entryDate of datesToLog) {
@@ -841,6 +850,7 @@ export class TimesheetBot extends TeamsActivityHandler {
             timesheetId = await this.odooService.logTime(entry, teamsUserId);
           }
           timesheetIds.push(timesheetId);
+          savedDates.push(entryDate);
         } catch (entryError) {
           logger.error('Failed to save timesheet entry for date', { date: entryDate, error: entryError });
           failedDates.push(entryDate);
@@ -875,7 +885,8 @@ export class TimesheetBot extends TeamsActivityHandler {
         ...data,
         task_id: taskId,
         task_name: taskName,
-        dates: data.dates?.filter(d => !failedDates.includes(d)),
+        date: savedDates[0],
+        dates: savedDates.length > 1 ? savedDates : undefined,
       };
 
       // Update the original card to show confirmed state (removes buttons)
@@ -907,6 +918,40 @@ export class TimesheetBot extends TeamsActivityHandler {
       );
       await context.sendActivity({ attachments: [errorCard] });
     }
+  }
+
+  private normalizeSubmittedDates(data: TimesheetCardData): { valid: true; dates: string[] } | { valid: false; error: string } {
+    if (data.dates === undefined) {
+      return { valid: true, dates: [data.date] };
+    }
+
+    if (!Array.isArray(data.dates)) {
+      return { valid: false, error: 'Invalid dates format' };
+    }
+
+    if (data.dates.length === 0) {
+      return { valid: true, dates: [data.date] };
+    }
+
+    if (data.dates.length > MAX_DATES) {
+      return { valid: false, error: `Too many dates submitted (maximum ${MAX_DATES})` };
+    }
+
+    const dates: string[] = [];
+    for (const submittedDate of data.dates) {
+      if (typeof submittedDate !== 'string') {
+        return { valid: false, error: 'Invalid date format (expected YYYY-MM-DD)' };
+      }
+
+      const sanitizedDate = sanitizeDate(submittedDate);
+      if (!sanitizedDate) {
+        return { valid: false, error: 'Invalid date format (expected YYYY-MM-DD)' };
+      }
+
+      dates.push(sanitizedDate);
+    }
+
+    return { valid: true, dates };
   }
 
   /**

@@ -455,6 +455,62 @@ describe('TimesheetBot', () => {
         attachments: [expect.any(Object)]
       });
     });
+
+    it('should reject submitted date arrays exceeding the max before saving', async () => {
+      const tooManyDates = Array.from({ length: 15 }, (_, index) => {
+        const date = new Date('2024-01-01T00:00:00.000Z');
+        date.setUTCDate(date.getUTCDate() + index);
+        return date.toISOString().split('T')[0];
+      });
+      const multiDateData: TimesheetCardData = {
+        ...mockCardData,
+        dates: tooManyDates
+      };
+
+      (TimesheetCardGenerator.createErrorCard as jest.Mock).mockReturnValue({
+        contentType: 'application/vnd.microsoft.card.adaptive',
+        content: { type: 'AdaptiveCard', version: '1.3' }
+      });
+
+      await (bot as any).handleSaveTimesheet(mockContext as TurnContext, multiDateData);
+
+      expect(mockOdooService.logTime).not.toHaveBeenCalled();
+      expect(TimesheetCardGenerator.createErrorCard).toHaveBeenCalledWith(
+        expect.stringContaining('Too many dates submitted')
+      );
+      expect(sendActivityMock).toHaveBeenCalledWith({
+        attachments: [expect.any(Object)]
+      });
+    });
+
+    it('should show only the saved date when the first submitted date fails', async () => {
+      const multiDateData: TimesheetCardData = {
+        ...mockCardData,
+        date: '2024-01-15',
+        dates: ['2024-01-15', '2024-01-16']
+      };
+
+      (mockOdooService.logTime as jest.Mock)
+        .mockRejectedValueOnce(new Error('First date failed'))
+        .mockResolvedValueOnce(456);
+      (TimesheetCardGenerator.createConfirmedCard as jest.Mock).mockReturnValue({
+        contentType: 'application/vnd.microsoft.card.adaptive',
+        content: { type: 'AdaptiveCard', version: '1.3' }
+      });
+
+      await (bot as any).handleSaveTimesheet(mockContext as TurnContext, multiDateData);
+
+      expect(mockOdooService.logTime).toHaveBeenCalledTimes(2);
+      expect(sendActivityMock).toHaveBeenCalledWith(
+        expect.stringContaining('Saved 1 of 2 timesheet entries')
+      );
+      expect(TimesheetCardGenerator.createConfirmedCard).toHaveBeenCalledWith(
+        expect.objectContaining({
+          date: '2024-01-16',
+          dates: undefined
+        })
+      );
+    });
   });
 
   describe('handleCancelTimesheet', () => {
