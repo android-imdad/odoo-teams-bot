@@ -362,8 +362,8 @@ export class TimesheetBot extends TeamsActivityHandler {
 
       const billableLabel = BillabilityPreferenceService.getLabel(cardData.billable);
       const dateDisplay = cardData.dates && cardData.dates.length > 1
-        ? cardData.dates.join(', ')
-        : cardData.date;
+        ? TimesheetCardGenerator.formatDatesList(cardData.dates)
+        : TimesheetCardGenerator.formatDate(cardData.date);
       const confirmCard = TimesheetCardGenerator.createConfirmationCard(cardData);
       await context.sendActivity({
         text: `Please confirm your timesheet:\n\nProject: ${cardData.project_name}\nTask: ${cardData.task_name || 'None'}\nHours: ${cardData.hours}\nDate: ${dateDisplay}\nBillable: ${billableLabel}\nDescription: ${cardData.description}`,
@@ -874,8 +874,9 @@ export class TimesheetBot extends TeamsActivityHandler {
 
       // If some dates failed, notify the user about partial success
       if (failedDates.length > 0) {
+        const formattedFailed = failedDates.map(d => TimesheetCardGenerator.formatDate(d)).join(', ');
         await context.sendActivity(
-          `Saved ${timesheetIds.length} of ${datesToLog.length} timesheet entries. Failed for date(s): ${failedDates.join(', ')}. Please retry those dates individually.`
+          `Saved ${timesheetIds.length} of ${datesToLog.length} timesheet entries. Failed for date(s): ${formattedFailed}. Please retry those dates individually.`
         );
       }
 
@@ -922,7 +923,11 @@ export class TimesheetBot extends TeamsActivityHandler {
 
   private normalizeSubmittedDates(data: TimesheetCardData): { valid: true; dates: string[] } | { valid: false; error: string } {
     if (data.dates === undefined) {
-      return { valid: true, dates: [data.date] };
+      const sanitizedSingle = sanitizeDate(data.date);
+      if (!sanitizedSingle) {
+        return { valid: false, error: 'Invalid date format (expected YYYY-MM-DD)' };
+      }
+      return { valid: true, dates: [sanitizedSingle] };
     }
 
     if (!Array.isArray(data.dates)) {
@@ -930,7 +935,11 @@ export class TimesheetBot extends TeamsActivityHandler {
     }
 
     if (data.dates.length === 0) {
-      return { valid: true, dates: [data.date] };
+      const sanitizedSingle = sanitizeDate(data.date);
+      if (!sanitizedSingle) {
+        return { valid: false, error: 'Invalid date format (expected YYYY-MM-DD)' };
+      }
+      return { valid: true, dates: [sanitizedSingle] };
     }
 
     if (data.dates.length > MAX_DATES) {

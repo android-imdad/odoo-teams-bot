@@ -567,7 +567,7 @@ export class TimesheetCardGenerator {
   /**
    * Format date for display
    */
-  private static formatDate(date: string): string {
+  public static formatDate(date: string): string {
     try {
       const parsed = new Date(date);
       return format(parsed, 'EEEE, MMMM d, yyyy');
@@ -580,7 +580,7 @@ export class TimesheetCardGenerator {
    * Format a list of dates for display, truncating if there are too many.
    * Shows up to MAX_DISPLAY_DATES individually, then appends "and N more".
    */
-  private static formatDatesList(dates: string[]): string {
+  public static formatDatesList(dates: string[]): string {
     const formatted = dates.slice(0, MAX_DISPLAY_DATES).map(d => this.formatDate(d));
     if (dates.length > MAX_DISPLAY_DATES) {
       formatted.push(`and ${dates.length - MAX_DISPLAY_DATES} more`);

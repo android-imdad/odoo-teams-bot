@@ -511,6 +511,46 @@ describe('TimesheetBot', () => {
         })
       );
     });
+
+    it('should reject invalid single date when dates array is undefined', async () => {
+      const badDateData: TimesheetCardData = {
+        ...mockCardData,
+        date: 'not-a-date',
+        dates: undefined
+      };
+
+      (TimesheetCardGenerator.createErrorCard as jest.Mock).mockReturnValue({
+        contentType: 'application/vnd.microsoft.card.adaptive',
+        content: { type: 'AdaptiveCard', version: '1.3' }
+      });
+
+      await (bot as any).handleSaveTimesheet(mockContext as TurnContext, badDateData);
+
+      expect(mockOdooService.logTime).not.toHaveBeenCalled();
+      expect(TimesheetCardGenerator.createErrorCard).toHaveBeenCalledWith(
+        expect.stringContaining('Invalid date format')
+      );
+    });
+
+    it('should reject invalid single date when dates array is empty', async () => {
+      const badDateData: TimesheetCardData = {
+        ...mockCardData,
+        date: 'invalid-date',
+        dates: []
+      };
+
+      (TimesheetCardGenerator.createErrorCard as jest.Mock).mockReturnValue({
+        contentType: 'application/vnd.microsoft.card.adaptive',
+        content: { type: 'AdaptiveCard', version: '1.3' }
+      });
+
+      await (bot as any).handleSaveTimesheet(mockContext as TurnContext, badDateData);
+
+      expect(mockOdooService.logTime).not.toHaveBeenCalled();
+      expect(TimesheetCardGenerator.createErrorCard).toHaveBeenCalledWith(
+        expect.stringContaining('Invalid date format')
+      );
+    });
   });
 
   describe('handleCancelTimesheet', () => {

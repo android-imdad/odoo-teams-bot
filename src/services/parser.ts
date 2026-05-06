@@ -261,7 +261,7 @@ Parsing rules:
 
     // Validate the dates array; fall back to single date field
     const rawDates: unknown[] = Array.isArray((data as any).dates) ? (data as any).dates : [];
-    const validDates = rawDates
+    let validDates = rawDates
       .map(d => this.validateDate(typeof d === 'string' ? d : null))
       .filter((d): d is string => d !== null);
     if (validDates.length > MAX_DATES) {
@@ -269,7 +269,7 @@ Parsing rules:
         count: validDates.length,
         max: MAX_DATES
       });
-      validDates.splice(MAX_DATES);
+      validDates = validDates.slice(0, MAX_DATES);
     }
     const dates: string[] | null = validDates.length > 0 ? validDates : null;
     const date = dates ? dates[0] : this.validateDate(data.date);
