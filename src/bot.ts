@@ -355,7 +355,7 @@ export class TimesheetBot extends TeamsActivityHandler {
         new_task_name: parsed.new_task_name || undefined,
         hours: parsed.hours,
         date: parsed.date,
-        dates: parsed.dates && parsed.dates.length > 1 ? parsed.dates : undefined,
+        dates: parsed.dates && parsed.dates.length > 0 ? parsed.dates : undefined,
         description: parsed.description,
         billable
       };
@@ -814,10 +814,13 @@ export class TimesheetBot extends TeamsActivityHandler {
         }
       }
 
-      // Determine which dates to log — use dates array if multiple, else single date
-      const datesToLog = data.dates && data.dates.length > 0 ? data.dates : [data.date];
+      // Determine which dates to log — use dates array if present, else single date
+      const datesToLog = (data.dates && data.dates.length > 0) ? data.dates : [data.date];
 
       const timesheetIds: number[] = [];
+      const failedDates: string[] = [];
+      let lastError: Error | null = null;
+
       for (const entryDate of datesToLog) {
         const entry: TimesheetEntry = {
           project_id: data.project_id,
@@ -830,21 +833,42 @@ export class TimesheetBot extends TeamsActivityHandler {
           billable: data.billable
         };
 
-        let timesheetId: number;
-        if (this.isAdminProxyMode && teamsEmail) {
-          timesheetId = await this.odooService.logTime(entry, undefined, teamsEmail);
-        } else {
-          timesheetId = await this.odooService.logTime(entry, teamsUserId);
+        try {
+          let timesheetId: number;
+          if (this.isAdminProxyMode && teamsEmail) {
+            timesheetId = await this.odooService.logTime(entry, undefined, teamsEmail);
+          } else {
+            timesheetId = await this.odooService.logTime(entry, teamsUserId);
+          }
+          timesheetIds.push(timesheetId);
+        } catch (entryError) {
+          logger.error('Failed to save timesheet entry for date', { date: entryDate, error: entryError });
+          failedDates.push(entryDate);
+          lastError = entryError instanceof Error ? entryError : new Error(String(entryError));
         }
-        timesheetIds.push(timesheetId);
       }
 
-      logger.info('Timesheet(s) saved successfully', {
+      // If all dates failed, throw to trigger the outer error handler
+      if (timesheetIds.length === 0 && lastError) {
+        throw lastError;
+      }
+
+      logger.info('Timesheet(s) saved', {
         timesheetIds,
         count: timesheetIds.length,
+        failedDates,
+        failedCount: failedDates.length,
         userId: teamsUserId,
         emailHash: hashEmail(teamsEmail)
       });
+
+      // If some dates failed, notify the user about partial success
+      if (failedDates.length > 0) {
+        const partialMsg = timesheetIds.length > 0
+          ? `Saved ${timesheetIds.length} of ${datesToLog.length} timesheet entries. Failed for date(s): ${failedDates.join(', ')}. Please retry those dates individually.`
+          : `Failed to save timesheet entries for all date(s): ${failedDates.join(', ')}.`;
+        await context.sendActivity(partialMsg);
+      }
 
       // Update data with the new task info for the confirmed card
       const confirmedData: TimesheetCardData = {

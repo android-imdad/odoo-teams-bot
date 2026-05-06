@@ -5,6 +5,9 @@ import { ParsedTimesheetData } from '../types';
 import { OdooProject, OdooTask } from '../types/odoo.types';
 import { format } from 'date-fns';
 
+/** Maximum number of dates allowed in a single timesheet submission. */
+export const MAX_DATES = 14;
+
 /**
  * Common prompt injection patterns to detect and warn about.
  * Not a blocklist — just used for logging/monitoring.
@@ -149,7 +152,7 @@ Parsing rules:
 3. If creating a new task, extract the new task name from the user's input
 4. If NOT creating a new task, try to identify an existing task from the available tasks list
 5. Extract the number of hours worked. Supported formats: "4 hours", "4h", "4.5 hours", "4.5h". Also support "H:MM" format where "7:45" means 7 hours and 45 minutes — convert to decimal (e.g., 7:45 → 7.75). Always return hours as a decimal number.
-6. Extract ALL dates mentioned. If multiple days are mentioned (e.g., "Monday, Tuesday and Wednesday", "last 3 days"), extract each as YYYY-MM-DD and put all in the "dates" array. Set "date" to the first date. If only one date mentioned, "dates" should contain just that one date. If no date mentioned, use today (${today}) for both "date" and "dates".
+6. Extract ALL dates mentioned. If multiple days are mentioned (e.g., "Monday, Tuesday and Wednesday", "last 3 days", or a date range like "April 23 to April 27"), expand each day as YYYY-MM-DD and put all in the "dates" array. For date ranges, expand the range into individual dates (e.g., "April 23 to April 27" → ["2026-04-23", "2026-04-24", "2026-04-25", "2026-04-26", "2026-04-27"]). Set "date" to the first date. If only one date mentioned, "dates" should contain just that one date. If no date mentioned, use today (${today}) for both "date" and "dates". Maximum ${MAX_DATES} dates allowed — if a range exceeds this, use only the first ${MAX_DATES} dates.
 7. Extract the work description/task details
 8. If project cannot be identified with certainty, set project_id and project_name to null
 9. If create_new_task is true, set task_id and task_name to null
@@ -261,6 +264,13 @@ Parsing rules:
     const validDates = rawDates
       .map(d => this.validateDate(typeof d === 'string' ? d : null))
       .filter((d): d is string => d !== null);
+    if (validDates.length > MAX_DATES) {
+      logger.warn('Dates array exceeds maximum, truncating', {
+        count: validDates.length,
+        max: MAX_DATES
+      });
+      validDates.splice(MAX_DATES);
+    }
     const dates: string[] | null = validDates.length > 0 ? validDates : null;
     const date = dates ? dates[0] : this.validateDate(data.date);
 
@@ -306,6 +316,8 @@ Parsing rules:
         const total = h + m / 60;
         return total > 0 ? Math.round(total * 1000) / 1000 : null;
       }
+      // H:MM format matched but minutes out of range — don't fall through to parseFloat
+      return null;
     }
     const num = parseFloat(str);
     return !isNaN(num) && num > 0 ? num : null;

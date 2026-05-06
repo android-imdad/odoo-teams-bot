@@ -3,6 +3,9 @@ import { TimesheetCardData } from '../types/bot.types';
 import { format } from 'date-fns';
 import { BillabilityPreferenceService } from '../services/billabilityPreference';
 
+/** Max dates to display individually before truncating with "and N more". */
+const MAX_DISPLAY_DATES = 7;
+
 export class TimesheetCardGenerator {
   /**
    * Get the billability display label for a card
@@ -69,7 +72,7 @@ export class TimesheetCardGenerator {
             },
             ...(data.dates && data.dates.length > 1 ? [{
               title: 'Dates:',
-              value: data.dates.map(d => this.formatDate(d)).join(', ')
+              value: this.formatDatesList(data.dates)
             }] : [{
               title: 'Date:',
               value: this.formatDate(data.date)
@@ -154,7 +157,7 @@ export class TimesheetCardGenerator {
             },
             ...(data.dates && data.dates.length > 1 ? [{
               title: 'Dates:',
-              value: data.dates.map(d => this.formatDate(d)).join(', ')
+              value: this.formatDatesList(data.dates)
             }] : [{
               title: 'Date:',
               value: this.formatDate(data.date)
@@ -571,5 +574,17 @@ export class TimesheetCardGenerator {
     } catch {
       return date;
     }
+  }
+
+  /**
+   * Format a list of dates for display, truncating if there are too many.
+   * Shows up to MAX_DISPLAY_DATES individually, then appends "and N more".
+   */
+  private static formatDatesList(dates: string[]): string {
+    const formatted = dates.slice(0, MAX_DISPLAY_DATES).map(d => this.formatDate(d));
+    if (dates.length > MAX_DISPLAY_DATES) {
+      formatted.push(`and ${dates.length - MAX_DISPLAY_DATES} more`);
+    }
+    return formatted.join(', ');
   }
 }

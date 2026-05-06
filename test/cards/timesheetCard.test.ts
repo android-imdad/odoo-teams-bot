@@ -671,4 +671,154 @@ describe('TimesheetCardGenerator', () => {
       }).not.toThrow();
     });
   });
+
+  describe('Multi-Date Card Rendering', () => {
+    const multiDateData: TimesheetCardData = {
+      project_id: 1,
+      project_name: 'Website Redesign',
+      hours: 4,
+      date: '2024-01-15',
+      dates: ['2024-01-15', '2024-01-16', '2024-01-17'],
+      description: 'Multi-day work'
+    };
+
+    it('should show "Dates:" label when multiple dates are provided (confirmation card)', () => {
+      const card = TimesheetCardGenerator.createConfirmationCard(multiDateData);
+      const factSet = card.content.body.find((item: any) => item.type === 'FactSet');
+      const datesFact = factSet.facts.find((f: any) => f.title === 'Dates:');
+      const singleDateFact = factSet.facts.find((f: any) => f.title === 'Date:');
+
+      expect(datesFact).toBeDefined();
+      expect(singleDateFact).toBeUndefined();
+      // Dates are formatted by formatDate, so just check it contains parts of the formatted dates
+      expect(datesFact.value).toContain('January 15, 2024');
+      expect(datesFact.value).toContain('January 16, 2024');
+      expect(datesFact.value).toContain('January 17, 2024');
+    });
+
+    it('should show "Date:" label when only single date (no dates array) in confirmation card', () => {
+      const singleDateData = { ...mockCardData }; // no dates property
+      const card = TimesheetCardGenerator.createConfirmationCard(singleDateData);
+      const factSet = card.content.body.find((item: any) => item.type === 'FactSet');
+      const datesFact = factSet.facts.find((f: any) => f.title === 'Dates:');
+      const singleDateFact = factSet.facts.find((f: any) => f.title === 'Date:');
+
+      expect(datesFact).toBeUndefined();
+      expect(singleDateFact).toBeDefined();
+    });
+
+    it('should show "Date:" label when dates array has only one entry in confirmation card', () => {
+      const singleDateInArray: TimesheetCardData = {
+        ...mockCardData,
+        dates: ['2024-01-15']
+      };
+      const card = TimesheetCardGenerator.createConfirmationCard(singleDateInArray);
+      const factSet = card.content.body.find((item: any) => item.type === 'FactSet');
+      const datesFact = factSet.facts.find((f: any) => f.title === 'Dates:');
+      const singleDateFact = factSet.facts.find((f: any) => f.title === 'Date:');
+
+      // Single date should use "Date:" not "Dates:"
+      expect(datesFact).toBeUndefined();
+      expect(singleDateFact).toBeDefined();
+    });
+
+    it('should show entry count message in confirmed card for multi-day entries', () => {
+      const card = TimesheetCardGenerator.createConfirmedCard(multiDateData);
+
+      expect(card.content.body[0].items[1].text).toBe('Your 3 timesheet entries have been saved to Odoo.');
+    });
+
+    it('should show standard message in confirmed card for single date entries', () => {
+      const singleDateData = { ...mockCardData }; // no dates
+      const card = TimesheetCardGenerator.createConfirmedCard(singleDateData);
+
+      expect(card.content.body[0].items[1].text).toBe('Your timesheet has been saved to Odoo.');
+    });
+
+    it('should show "Dates:" in confirmed card for multi-day entries', () => {
+      const card = TimesheetCardGenerator.createConfirmedCard(multiDateData);
+      const factSet = card.content.body.find((item: any) => item.type === 'FactSet');
+      const datesFact = factSet.facts.find((f: any) => f.title === 'Dates:');
+
+      expect(datesFact).toBeDefined();
+    });
+
+    it('should show "Date:" in confirmed card for single date entries', () => {
+      const singleDateData = { ...mockCardData };
+      const card = TimesheetCardGenerator.createConfirmedCard(singleDateData);
+      const factSet = card.content.body.find((item: any) => item.type === 'FactSet');
+      const singleDateFact = factSet.facts.find((f: any) => f.title === 'Date:');
+
+      expect(singleDateFact).toBeDefined();
+    });
+
+    it('should preserve dates in action data for confirmation card', () => {
+      const card = TimesheetCardGenerator.createConfirmationCard(multiDateData);
+      const confirmAction = card.content.actions[0];
+
+      expect(confirmAction.data.dates).toEqual(['2024-01-15', '2024-01-16', '2024-01-17']);
+    });
+
+    it('should format each date in the Dates fact', () => {
+      const card = TimesheetCardGenerator.createConfirmationCard(multiDateData);
+      const factSet = card.content.body.find((item: any) => item.type === 'FactSet');
+      const datesFact = factSet.facts.find((f: any) => f.title === 'Dates:');
+
+      // Dates are formatted like "Monday, January 15, 2024, Tuesday, January 16, 2024, ..."
+      // Check that all three raw dates appear in the formatted output
+      expect(datesFact.value).toContain('January 15, 2024');
+      expect(datesFact.value).toContain('January 16, 2024');
+      expect(datesFact.value).toContain('January 17, 2024');
+    });
+
+    it('should truncate date list when more than MAX_DISPLAY_DATES dates provided', () => {
+      const dates: string[] = [];
+      for (let i = 0; i < 10; i++) {
+        const d = new Date('2024-01-01');
+        d.setDate(d.getDate() + i);
+        dates.push(d.toISOString().split('T')[0]);
+      }
+
+      const manyDatesData: TimesheetCardData = {
+        project_id: 1,
+        project_name: 'Website Redesign',
+        hours: 4,
+        date: dates[0],
+        dates: dates,
+        description: 'Many days of work'
+      };
+
+      const card = TimesheetCardGenerator.createConfirmationCard(manyDatesData);
+      const factSet = card.content.body.find((item: any) => item.type === 'FactSet');
+      const datesFact = factSet.facts.find((f: any) => f.title === 'Dates:');
+
+      expect(datesFact).toBeDefined();
+      expect(datesFact.value).toContain('and 3 more');
+    });
+
+    it('should not truncate date list when at exactly MAX_DISPLAY_DATES dates', () => {
+      const dates: string[] = [];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date('2024-01-01');
+        d.setDate(d.getDate() + i);
+        dates.push(d.toISOString().split('T')[0]);
+      }
+
+      const exactDatesData: TimesheetCardData = {
+        project_id: 1,
+        project_name: 'Website Redesign',
+        hours: 4,
+        date: dates[0],
+        dates: dates,
+        description: 'Seven days of work'
+      };
+
+      const card = TimesheetCardGenerator.createConfirmationCard(exactDatesData);
+      const factSet = card.content.body.find((item: any) => item.type === 'FactSet');
+      const datesFact = factSet.facts.find((f: any) => f.title === 'Dates:');
+
+      expect(datesFact).toBeDefined();
+      expect(datesFact.value).not.toContain('more');
+    });
+  });
 });

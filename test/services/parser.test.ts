@@ -95,6 +95,7 @@ describe('ParserService', () => {
         new_task_name: null,
         hours: 4.5,
         date: '2024-01-15',
+        dates: null,
         description: 'Homepage redesign work',
         confidence: 0.95,
         billable: null
@@ -933,6 +934,400 @@ Doing homepage updates`;
 
       expect(result.error).toBeUndefined();
       expect(result.confidence).toBe(0.98);
+    });
+  });
+
+  describe('Hours Parsing (H:MM format)', () => {
+    it('should parse H:MM format hours from string "7:45" to 7.75', async () => {
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: '7:45',
+            date: '2024-01-15',
+            description: 'Full day work',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('7:45 on Website Redesign doing full day work', mockProjects);
+
+      expect(result.hours).toBe(7.75);
+    });
+
+    it('should parse H:MM format hours from string "1:30" to 1.5', async () => {
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: '1:30',
+            date: '2024-01-15',
+            description: 'Quick task',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('1:30 on Website Redesign', mockProjects);
+
+      expect(result.hours).toBe(1.5);
+    });
+
+    it('should parse H:MM format hours from string "0:30" to 0.5', async () => {
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: '0:30',
+            date: '2024-01-15',
+            description: 'Quick fix',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('0:30 on Website Redesign', mockProjects);
+
+      expect(result.hours).toBe(0.5);
+    });
+
+    it('should parse plain numeric string hours', async () => {
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: '4.5',
+            date: '2024-01-15',
+            description: 'Half day work',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('4.5 hours on Website Redesign', mockProjects);
+
+      expect(result.hours).toBe(4.5);
+    });
+
+    it('should still accept numeric hours directly', async () => {
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: 4.5,
+            date: '2024-01-15',
+            description: 'Half day work',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('4.5 hours on Website Redesign', mockProjects);
+
+      expect(result.hours).toBe(4.5);
+    });
+
+    it('should return null for invalid H:MM with minutes >= 60', async () => {
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: '7:75',
+            date: '2024-01-15',
+            description: 'Invalid minutes',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('7:75 on Website Redesign', mockProjects);
+
+      expect(result.hours).toBeNull();
+      expect(result.error).toBe('Hours could not be extracted');
+    });
+
+    it('should return null for "0:00" format (zero hours)', async () => {
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: '0:00',
+            date: '2024-01-15',
+            description: 'Zero hours',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('0:00 on Website Redesign', mockProjects);
+
+      expect(result.hours).toBeNull();
+    });
+
+    it('should return null for non-numeric string hours', async () => {
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: 'not-a-number',
+            date: '2024-01-15',
+            description: 'Invalid hours',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('Test', mockProjects);
+
+      expect(result.hours).toBeNull();
+    });
+  });
+
+  describe('Multi-Date Parsing', () => {
+    it('should parse dates array from AI response', async () => {
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: 4,
+            date: '2024-01-15',
+            dates: ['2024-01-15', '2024-01-16', '2024-01-17'],
+            description: 'Multi-day work',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('4 hours on Website Redesign Mon Tue Wed', mockProjects);
+
+      expect(result.dates).toEqual(['2024-01-15', '2024-01-16', '2024-01-17']);
+      expect(result.date).toBe('2024-01-15'); // date should be first in dates
+    });
+
+    it('should set date to first date from dates array', async () => {
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: 4,
+            date: '2024-01-15',
+            dates: ['2024-01-15', '2024-01-16'],
+            description: 'Work',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('4 hours Mon Tue', mockProjects);
+
+      expect(result.date).toBe('2024-01-15');
+      expect(result.dates).toEqual(['2024-01-15', '2024-01-16']);
+    });
+
+    it('should handle single date in dates array', async () => {
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: 4,
+            date: '2024-01-15',
+            dates: ['2024-01-15'],
+            description: 'Work',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('4 hours today on Website Redesign', mockProjects);
+
+      expect(result.dates).toEqual(['2024-01-15']);
+      expect(result.date).toBe('2024-01-15');
+    });
+
+    it('should fall back to date field when dates array is missing', async () => {
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: 4,
+            date: '2024-01-15',
+            description: 'Work',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('4 hours on Website Redesign', mockProjects);
+
+      expect(result.dates).toBeNull();
+      expect(result.date).toBe('2024-01-15');
+    });
+
+    it('should filter out invalid dates from dates array', async () => {
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: 4,
+            date: '2024-01-15',
+            dates: ['2024-01-15', 'invalid-date', '2024-01-17'],
+            description: 'Work',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('4 hours Mon Tue Wed on Website Redesign', mockProjects);
+
+      expect(result.dates).toEqual(['2024-01-15', '2024-01-17']);
+      expect(result.date).toBe('2024-01-15');
+    });
+
+    it('should handle empty dates array', async () => {
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: 4,
+            date: '2024-01-15',
+            dates: [],
+            description: 'Work',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('4 hours on Website Redesign', mockProjects);
+
+      expect(result.dates).toBeNull();
+      expect(result.date).toBe('2024-01-15');
+    });
+
+    it('should handle non-string entries in dates array', async () => {
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: 4,
+            date: '2024-01-15',
+            dates: ['2024-01-15', 12345, null],
+            description: 'Work',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('4 hours on Website Redesign', mockProjects);
+
+      expect(result.dates).toEqual(['2024-01-15']);
+      expect(result.date).toBe('2024-01-15');
+    });
+  });
+
+  describe('MAX_DATES limit', () => {
+    it('should truncate dates array exceeding MAX_DATES', async () => {
+      // Generate 20 dates
+      const manyDates = Array.from({ length: 20 }, (_, i) => {
+        const d = new Date('2024-01-01');
+        d.setDate(d.getDate() + i);
+        return d.toISOString().split('T')[0];
+      });
+
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: 4,
+            date: manyDates[0],
+            dates: manyDates,
+            description: 'Work',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('4 hours on Website Redesign for 20 days', mockProjects);
+
+      expect(result.dates!.length).toBe(14); // MAX_DATES = 14
+      expect(result.dates![0]).toBe('2024-01-01');
+      expect(result.date).toBe('2024-01-01');
+    });
+
+    it('should allow dates array at exactly MAX_DATES', async () => {
+      const dates = Array.from({ length: 14 }, (_, i) => {
+        const d = new Date('2024-01-01');
+        d.setDate(d.getDate() + i);
+        return d.toISOString().split('T')[0];
+      });
+
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: 4,
+            date: dates[0],
+            dates: dates,
+            description: 'Work',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('4 hours on Website Redesign for 14 days', mockProjects);
+
+      expect(result.dates!.length).toBe(14);
     });
   });
 });
