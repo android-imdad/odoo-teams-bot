@@ -101,6 +101,12 @@ describe('sanitizeDate', () => {
     expect(sanitizeDate('2024-13-01')).toBeNull();
   });
 
+  it('should reject rollover calendar dates', () => {
+    expect(sanitizeDate('2024-02-31')).toBeNull();
+    expect(sanitizeDate('2024-04-31')).toBeNull();
+    expect(sanitizeDate('2023-02-29')).toBeNull();
+  });
+
   it('should reject dates outside reasonable bounds', () => {
     expect(sanitizeDate('2020-12-31')).toBeNull();
     expect(sanitizeDate('2030-01-01')).toBeNull();

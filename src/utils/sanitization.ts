@@ -115,9 +115,17 @@ export function sanitizeDate(input: string): string | null {
     return null;
   }
 
-  // Validate it's a real date
-  const date = new Date(sanitized);
+  const [year, month, day] = sanitized.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
   if (isNaN(date.getTime())) {
+    return null;
+  }
+
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
     return null;
   }
 

@@ -561,6 +561,30 @@ describe('ParserService', () => {
       expect(result.date).toBeNull();
     });
 
+    it('should reject rollover date values', async () => {
+      const mockResponse = {
+        response: {
+          text: () => JSON.stringify({
+            project_id: 1,
+            project_name: 'Website Redesign',
+            hours: 4,
+            date: '2024-02-31',
+            dates: ['2024-02-31'],
+            description: 'Test',
+            confidence: 0.9
+          })
+        }
+      };
+
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const result = await parserService.parseText('Test', mockProjects);
+
+      expect(result.date).toBeNull();
+      expect(result.dates).toBeNull();
+      expect(result.error).toBe('Date could not be determined');
+    });
+
     it('should reject malformed date string', async () => {
       const mockResponse = {
         response: {

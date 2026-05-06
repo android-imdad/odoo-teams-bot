@@ -3,6 +3,7 @@ import { config } from '../config/config';
 import { logger } from '../config/logger';
 import { ParsedTimesheetData } from '../types';
 import { OdooProject, OdooTask } from '../types/odoo.types';
+import { sanitizeDate } from '../utils/sanitization';
 import { format } from 'date-fns';
 
 /** Maximum number of dates allowed in a single timesheet submission. */
@@ -329,20 +330,13 @@ Parsing rules:
   private validateDate(date: string | null): string | null {
     if (!date) return null;
 
-    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-    if (!dateRegex.test(date)) {
-      logger.warn('Invalid date format', { date });
-      return null;
-    }
-
-    // Check if date is valid
-    const parsed = new Date(date);
-    if (isNaN(parsed.getTime())) {
+    const sanitizedDate = sanitizeDate(date);
+    if (!sanitizedDate) {
       logger.warn('Invalid date value', { date });
       return null;
     }
 
-    return date;
+    return sanitizedDate;
   }
 }
 
